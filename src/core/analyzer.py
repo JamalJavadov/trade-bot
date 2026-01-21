@@ -628,9 +628,6 @@ def analyze_symbol(
     ema_bias, ema_counts, ema_ratio = _aggregate_bias(ema_biases, htf_min_alignment)
     pd_bias, pd_counts, pd_ratio = _aggregate_bias(pd_biases, htf_min_alignment)
 
-    if not ema_bias and not pd_bias:
-        return Analysis(status="NO_TRADE", side="-", reason="HTF bias yoxdur (EMA və Premium/Discount)\n")
-
     df_impulse = _fetch_tf(impulse_tf)
     df_confirm = _fetch_tf(confirm_tf)
     df_measure = _fetch_tf(measurement_tf)
@@ -641,13 +638,16 @@ def analyze_symbol(
 
     candidates: List[Analysis] = []
 
-    if ema_bias in ("LONG", "SHORT"):
-        golden = _build_golden_zone_setup(df_impulse, df_confirm, ema_bias, atr1, strategy_cfg)
+    golden_biases = [ema_bias] if ema_bias in ("LONG", "SHORT") else ["LONG", "SHORT"]
+    measurement_biases = [pd_bias] if pd_bias in ("LONG", "SHORT") else ["LONG", "SHORT"]
+
+    for bias in golden_biases:
+        golden = _build_golden_zone_setup(df_impulse, df_confirm, bias, atr1, strategy_cfg)
         if golden:
             candidates.append(golden)
 
-    if pd_bias in ("LONG", "SHORT"):
-        measurement = _build_measurement_setup(df_measure, pd_bias, atr1, strategy_cfg)
+    for bias in measurement_biases:
+        measurement = _build_measurement_setup(df_measure, bias, atr1, strategy_cfg)
         if measurement:
             candidates.append(measurement)
 
@@ -657,11 +657,16 @@ def analyze_symbol(
     best = max(candidates, key=lambda x: x.score)
 
     dist_atr = abs(float(df_impulse["close"].iloc[-1]) - best.entry) / atr1
+    penalty = 1.0
     if dist_atr > max_entry_atr:
-        return Analysis(status="NO_TRADE", side="-", reason=f"Entry çox uzaqdır (dist={dist_atr:.2f} ATR)")
+        penalty *= 0.6
+        best.reason = f"{best.reason} | Entry uzaqdır ({dist_atr:.2f} ATR)"
+        best.status = "SETUP"
 
     if best.rr2 < min_rr2:
-        return Analysis(status="NO_TRADE", side="-", reason=f"RR aşağıdır ({best.rr2:.2f} < {min_rr2})")
+        penalty *= 0.7
+        best.reason = f"{best.reason} | RR aşağıdır ({best.rr2:.2f} < {min_rr2})"
+        best.status = "SETUP"
 
     scoring_cfg = settings.get("scoring", {})
     w_rr2 = float(scoring_cfg.get("w_rr2", 10.0))
@@ -687,13 +692,18 @@ def analyze_symbol(
         + conf_bonus * w_conf
         + confluence_count * w_conf_count
         + confirmation_bonus * w_confirmation
-    )
+    ) * penalty
     if best.details is not None:
         best.details = {
             **best.details,
             "ema_bias": ema_bias,
             "premium_discount_bias": pd_bias,
             "entry_distance_atr": float(dist_atr),
+            "filters": {
+                "min_rr2": min_rr2,
+                "max_entry_distance_atr": max_entry_atr,
+                "penalty_multiplier": penalty,
+            },
             "htf_bias_timeframes": htf_timeframes,
             "htf_bias_alignment_min": htf_min_alignment,
             "htf_bias_ema_votes": ema_biases,
