@@ -1255,6 +1255,21 @@ class App:
         self.best_form_tif_var = tk.StringVar(value="GTC")
         self.best_form_action_var = tk.StringVar(value="-")
         self.best_form_reduce_only_var = tk.StringVar(value="OFF (entry açırsan)")
+        self.pending_order_type_var = tk.StringVar(value="Limit (Pending)")
+        self.pending_order_entry_trigger_var = tk.StringVar(value="Mark")
+        self.pending_order_tpsl_trigger_var = tk.StringVar(value="Mark")
+        self.pending_order_symbol_var = tk.StringVar(value="-")
+        self.pending_order_side_var = tk.StringVar(value="-")
+        self.pending_order_entry_var = tk.StringVar(value="-")
+        self.pending_order_qty_var = tk.StringVar(value="-")
+        self.pending_order_tp_var = tk.StringVar(value="-")
+        self.pending_order_sl_var = tk.StringVar(value="-")
+        self.pending_order_leverage_var = tk.StringVar(value="-")
+        self.pending_order_margin_var = tk.StringVar(value="Isolated")
+        expiry_days = int(self.settings.get("risk", {}).get("max_orders_expiry_days", 7))
+        self.pending_order_expiry_var = tk.StringVar(value=f"{expiry_days} gün")
+        self.pending_order_notional_var = tk.StringVar(value="-")
+        self.pending_order_status_var = tk.StringVar(value="-")
 
         best_grid = ttk.Frame(best_frame, style="Card.TFrame")
         best_grid.pack(fill="x")
@@ -1372,6 +1387,50 @@ class App:
 
         for col in range(6):
             form_grid.columnconfigure(col, weight=1)
+
+        pending_frame = ttk.LabelFrame(
+            best_frame,
+            text="🟡 Pending Order Detalları",
+            style="Card.TLabelframe",
+            padding=10,
+        )
+        pending_frame.pack(fill="x", pady=(10, 0))
+
+        pending_grid = ttk.Frame(pending_frame, style="Card.TFrame")
+        pending_grid.pack(fill="x")
+
+        pending_rows = [
+            ("Market", self.pending_order_symbol_var),
+            ("Side", self.pending_order_side_var),
+            ("Order Type", self.pending_order_type_var),
+            ("Entry", self.pending_order_entry_var),
+            ("Size (Qty)", self.pending_order_qty_var),
+            ("Notional", self.pending_order_notional_var),
+            ("Take Profit (TP2)", self.pending_order_tp_var),
+            ("Stop Loss", self.pending_order_sl_var),
+            ("Leverage", self.pending_order_leverage_var),
+            ("Margin", self.pending_order_margin_var),
+            ("Entry Trigger", self.pending_order_entry_trigger_var),
+            ("TP/SL Trigger", self.pending_order_tpsl_trigger_var),
+            ("Action", self.best_form_action_var),
+            ("TIF", self.best_form_tif_var),
+            ("Reduce-Only", self.best_form_reduce_only_var),
+            ("Expiry", self.pending_order_expiry_var),
+            ("Pending Status", self.pending_order_status_var),
+        ]
+
+        for idx, (label, var) in enumerate(pending_rows):
+            row = idx // 3
+            col = (idx % 3) * 2
+            ttk.Label(pending_grid, text=f"{label}:", style="Secondary.TLabel").grid(
+                row=row, column=col, sticky="w", padx=(0, 6), pady=3
+            )
+            ttk.Label(pending_grid, textvariable=var, style="Normal.TLabel").grid(
+                row=row, column=col + 1, sticky="w", padx=(0, 18), pady=3
+            )
+
+        for col in range(6):
+            pending_grid.columnconfigure(col, weight=1)
 
         ttk.Separator(output_card, orient="horizontal").pack(fill="x", pady=(12, 8))
 
@@ -1707,6 +1766,7 @@ class App:
                 var.set(value)
             self._set_best_details("Skan nəticəsi gözlənilir.")
             self._set_best_form(None)
+            self._set_pending_order_details(None)
             self._set_manual_steps(None)
             return
 
@@ -1747,6 +1807,7 @@ class App:
             details_lines.append(f"• {key}: {value}")
         self._set_best_details("\n".join(details_lines))
         self._set_best_form(best)
+        self._set_pending_order_details(best)
         self._set_manual_steps(best)
 
     def _set_best_details(self, text: str) -> None:
@@ -1778,6 +1839,56 @@ class App:
         self.best_form_tp_var.set(f'{best.get("tp2", 0.0):.6f}')
         self.best_form_sl_var.set(f'{best.get("sl", 0.0):.6f}')
         self.best_form_action_var.set("Buy/Long" if side == "LONG" else "Sell/Short")
+
+    def _set_pending_order_details(self, best: Optional[dict]) -> None:
+        if not best:
+            self.pending_order_type_var.set("Limit (Pending)")
+            self.pending_order_entry_trigger_var.set("Mark")
+            self.pending_order_tpsl_trigger_var.set("Mark")
+            self.pending_order_symbol_var.set("-")
+            self.pending_order_side_var.set("-")
+            self.pending_order_entry_var.set("-")
+            self.pending_order_qty_var.set("-")
+            self.pending_order_tp_var.set("-")
+            self.pending_order_sl_var.set("-")
+            self.pending_order_leverage_var.set("-")
+            self.pending_order_margin_var.set("Isolated")
+            self.pending_order_notional_var.set("-")
+            self.pending_order_status_var.set("-")
+            return
+
+        symbol = best.get("symbol", "-")
+        side = best.get("side", "-")
+        entry = float(best.get("entry", 0.0))
+        qty = float(best.get("qty", 0.0))
+        tp2 = float(best.get("tp2", 0.0))
+        sl = float(best.get("sl", 0.0))
+        leverage = int(best.get("leverage", 0))
+        notional = entry * qty
+        status = best.get("status", "-")
+
+        if status == "SETUP":
+            pending_status = "Gözləmədə: 5m təsdiqi tələb olunur"
+        elif status == "OK":
+            pending_status = "Hazır: pending order yerləşdir"
+        else:
+            pending_status = "-"
+
+        self.pending_order_type_var.set("Limit (Pending)")
+        self.pending_order_entry_trigger_var.set("Mark")
+        self.pending_order_tpsl_trigger_var.set("Mark")
+        self.pending_order_symbol_var.set(symbol)
+        self.pending_order_side_var.set(side)
+        self.pending_order_entry_var.set(f"{entry:.6f}")
+        self.pending_order_qty_var.set(f"{qty:.6f}")
+        self.pending_order_tp_var.set(f"{tp2:.6f}")
+        self.pending_order_sl_var.set(f"{sl:.6f}")
+        self.pending_order_leverage_var.set(f"{leverage}x")
+        self.pending_order_margin_var.set("Isolated")
+        self.pending_order_notional_var.set(
+            f"{notional:.4f} USDT" if notional > 0 else "-"
+        )
+        self.pending_order_status_var.set(pending_status)
 
     def _set_manual_steps(self, best: Optional[dict]) -> None:
         if not best:
