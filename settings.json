@@ -1,6 +1,9 @@
 {
   "mode": "FUTURES_USDTM",
   "timeframes": {
+    "1d": {
+      "limit": 500
+    },
     "4h": {
       "limit": 500
     },
@@ -130,7 +133,9 @@
   "scoring": {
     "w_rr2": 10.0,
     "w_trend": 5.0,
-    "w_confluence": 3.0
+    "w_confluence": 3.0,
+    "w_confluence_count": 1.0,
+    "w_confirmation": 2.0
   },
   "scan": {
     "limit_15m": 500
@@ -138,6 +143,14 @@
   "strategy": {
     "impulse_lookback": 240,
     "htf_range_lookback": 200,
+    "htf_bias_timeframes": [
+      "1d",
+      "4h"
+    ],
+    "htf_min_alignment": 0.6,
+    "impulse_timeframe": "1h",
+    "confirm_timeframe": "15m",
+    "measurement_timeframe": "15m",
     "min_confluence": 1,
     "require_confluence": true,
     "allow_setup_if_no_confirm": true,

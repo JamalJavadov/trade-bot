@@ -18,6 +18,7 @@ class ScanResult:
     side: str
     rr2: float
     score: float
+    probability: float
     reason: str
     entry: float = 0.0
     sl: float = 0.0
@@ -38,6 +39,7 @@ class Plan:
     rr1: float
     rr2: float
     score: float
+    probability: float
     reason: str
     qty: float
     leverage: int
@@ -120,6 +122,13 @@ def _calc_qty(symbol: str, entry: float, sl: float, budget_usdt: float, risk_pct
     return qty, risk_target, risk_actual
 
 
+def _fit_probability(score: float, max_score: float) -> float:
+    if max_score <= 0:
+        return 0.0
+    pct = (score / max_score) * 100.0
+    return float(max(0.0, min(100.0, pct)))
+
+
 def run_scan_and_build_best_plan(
     binance_data,
     analyzer,
@@ -151,7 +160,7 @@ def run_scan_and_build_best_plan(
 
         # validate symbol (professional filter)
         if hasattr(binance_data, "is_valid_usdtm_perp") and not binance_data.is_valid_usdtm_perp(sym):
-            results.append(ScanResult(sym, "NO_TRADE", "-", 0.0, 0.0, "Symbol USDT-M PERP deyil / TRADING deyil"))
+            results.append(ScanResult(sym, "NO_TRADE", "-", 0.0, 0.0, 0.0, "Symbol USDT-M PERP deyil / TRADING deyil"))
             continue
 
         try:
@@ -163,6 +172,7 @@ def run_scan_and_build_best_plan(
                 side=a.side,
                 rr2=float(a.rr2),
                 score=float(a.score),
+                probability=0.0,
                 reason=a.reason,
                 entry=float(a.entry),
                 sl=float(a.sl),
@@ -191,6 +201,7 @@ def run_scan_and_build_best_plan(
                     rr1=a.rr1,
                     rr2=a.rr2,
                     score=a.score,
+                    probability=0.0,
                     reason=a.reason,
                     qty=qty,
                     leverage=int(leverage),
@@ -207,7 +218,19 @@ def run_scan_and_build_best_plan(
                         best_setup = plan
 
         except Exception as e:
-            results.append(ScanResult(sym, "NO_TRADE", "-", 0.0, 0.0, f"ERROR: {e}"))
+            results.append(ScanResult(sym, "NO_TRADE", "-", 0.0, 0.0, 0.0, f"ERROR: {e}"))
+
+    scored = [r.score for r in results if r.status in ("OK", "SETUP")]
+    max_score = max(scored) if scored else 0.0
+    for r in results:
+        if r.status in ("OK", "SETUP"):
+            r.probability = _fit_probability(r.score, max_score)
+        else:
+            r.probability = 0.0
+    if best_ok:
+        best_ok.probability = _fit_probability(best_ok.score, max_score)
+    if best_setup:
+        best_setup.probability = _fit_probability(best_setup.score, max_score)
 
     prefer_ok = bool(settings.get("strategy", {}).get("best_requires_ok", False))
     if prefer_ok:
@@ -244,13 +267,13 @@ def format_report(results: List[ScanResult], best: Optional[Plan], settings: Dic
     if ok:
         lines.append("=== TOP OK (Ready) ===")
         for r in _top(ok, 10):
-            lines.append(f"{r.symbol}: {r.side} | RR2={r.rr2:.2f} | score={r.score:.2f}")
+            lines.append(f"{r.symbol}: {r.side} | RR2={r.rr2:.2f} | fit={r.probability:.1f}% | score={r.score:.2f}")
         lines.append("")
 
     if setups:
         lines.append("=== TOP SETUP (Watch) ===")
         for r in _top(setups, 10):
-            lines.append(f"{r.symbol}: {r.side} | RR2={r.rr2:.2f} | score={r.score:.2f}")
+            lines.append(f"{r.symbol}: {r.side} | RR2={r.rr2:.2f} | fit={r.probability:.1f}% | score={r.score:.2f}")
         lines.append("")
 
     lines.append("=== BEST PLAN ===")
@@ -260,7 +283,7 @@ def format_report(results: List[ScanResult], best: Optional[Plan], settings: Dic
 
     lines.append(f"{best.symbol} | {best.side} | {best.status}")
     lines.append(f"Entry={best.entry:.6f} SL={best.sl:.6f} TP1={best.tp1:.6f} TP2={best.tp2:.6f}")
-    lines.append(f"RR1={best.rr1:.2f} RR2={best.rr2:.2f} | score={best.score:.2f}")
+    lines.append(f"RR1={best.rr1:.2f} RR2={best.rr2:.2f} | fit={best.probability:.1f}% | score={best.score:.2f}")
     lines.append(f"Səbəb: {best.reason}\n")
 
     if best.details:

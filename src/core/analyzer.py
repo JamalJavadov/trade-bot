@@ -80,6 +80,23 @@ def _premium_discount_bias(df4: pd.DataFrame, lookback: int) -> Optional[str]:
     return None
 
 
+def _aggregate_bias(biases: Dict[str, Optional[str]], min_alignment: float) -> Tuple[Optional[str], Dict[str, int], float]:
+    counts = {"LONG": 0, "SHORT": 0}
+    for bias in biases.values():
+        if bias in counts:
+            counts[bias] += 1
+    total = counts["LONG"] + counts["SHORT"]
+    if total == 0:
+        return None, counts, 0.0
+    if counts["LONG"] == counts["SHORT"]:
+        return None, counts, 0.0
+    best = "LONG" if counts["LONG"] > counts["SHORT"] else "SHORT"
+    ratio = counts[best] / total
+    if ratio < min_alignment:
+        return None, counts, ratio
+    return best, counts, ratio
+
+
 def _select_impulse_leg(df: pd.DataFrame, side: str, lookback: int) -> Optional[Tuple[int, int, float, float]]:
     d = df.tail(lookback)
     if len(d) < 50:
@@ -219,6 +236,46 @@ def _bearish_engulfing(df: pd.DataFrame) -> bool:
             and c2["open"] >= c1["close"] and c2["close"] <= c1["open"])
 
 
+def _morning_star(df: pd.DataFrame) -> bool:
+    if len(df) < 3:
+        return False
+    c1 = df.iloc[-3]
+    c2 = df.iloc[-2]
+    c3 = df.iloc[-1]
+    body1 = abs(c1["close"] - c1["open"])
+    body2 = abs(c2["close"] - c2["open"])
+    body3 = abs(c3["close"] - c3["open"])
+    if body1 == 0 or body3 == 0:
+        return False
+    midpoint = c1["open"] - body1 / 2 if c1["close"] < c1["open"] else c1["open"] + body1 / 2
+    return (
+        c1["close"] < c1["open"]
+        and body2 <= body1 * 0.5
+        and c3["close"] > c3["open"]
+        and c3["close"] >= midpoint
+    )
+
+
+def _evening_star(df: pd.DataFrame) -> bool:
+    if len(df) < 3:
+        return False
+    c1 = df.iloc[-3]
+    c2 = df.iloc[-2]
+    c3 = df.iloc[-1]
+    body1 = abs(c1["close"] - c1["open"])
+    body2 = abs(c2["close"] - c2["open"])
+    body3 = abs(c3["close"] - c3["open"])
+    if body1 == 0 or body3 == 0:
+        return False
+    midpoint = c1["open"] + body1 / 2 if c1["close"] > c1["open"] else c1["open"] - body1 / 2
+    return (
+        c1["close"] > c1["open"]
+        and body2 <= body1 * 0.5
+        and c3["close"] < c3["open"]
+        and c3["close"] <= midpoint
+    )
+
+
 def _rejection_wick(df: pd.DataFrame, side: str, zone_low: float, zone_high: float) -> bool:
     if len(df) < 1:
         return False
@@ -345,13 +402,32 @@ def _build_golden_zone_setup(
         weak_confluence = True
 
     confirmation = False
+    confirmation_pattern = None
     if in_zone:
         if side == "LONG":
-            confirmation = _bullish_engulfing(df_confirm) or _rejection_wick(df_confirm, "LONG", z_low, z_high)
+            if _bullish_engulfing(df_confirm):
+                confirmation = True
+                confirmation_pattern = "bullish_engulfing"
+            elif _morning_star(df_confirm):
+                confirmation = True
+                confirmation_pattern = "morning_star"
+            elif _rejection_wick(df_confirm, "LONG", z_low, z_high):
+                confirmation = True
+                confirmation_pattern = "rejection_wick"
         else:
-            confirmation = _bearish_engulfing(df_confirm) or _rejection_wick(df_confirm, "SHORT", z_low, z_high)
+            if _bearish_engulfing(df_confirm):
+                confirmation = True
+                confirmation_pattern = "bearish_engulfing"
+            elif _evening_star(df_confirm):
+                confirmation = True
+                confirmation_pattern = "evening_star"
+            elif _rejection_wick(df_confirm, "SHORT", z_low, z_high):
+                confirmation = True
+                confirmation_pattern = "rejection_wick"
         if confirmation:
             confirmation = _golden_respect(df_confirm, side, z_low, z_high, tol)
+            if not confirmation:
+                confirmation_pattern = None
 
     entry = last_close if confirmation and in_zone else (z_low + z_high) / 2.0
     sl_buffer = float(cfg.get("sl_atr_mult", 1.2))
@@ -414,7 +490,9 @@ def _build_golden_zone_setup(
             "near_zone": bool(near_zone),
             "dist_to_zone_atr": float(dist_to_zone / atr) if atr else None,
             "confirmation": bool(confirmation),
+            "confirmation_pattern": confirmation_pattern,
             "confluences": confluences,
+            "confluence_count": int(len(confluences)),
             "weak_confluence": bool(weak_confluence),
             "atr": float(atr),
         },
@@ -495,6 +573,7 @@ def _build_measurement_setup(
             "entry_zone_low": float(zone_low),
             "entry_zone_high": float(zone_high),
             "fvg_overlap": bool(fvg_overlap),
+            "confluence_count": int(1 if fvg_overlap else 0),
             "atr": float(atr),
             "sweep_idx": int(sweep_idx),
             "bos_idx": int(bos_idx),
@@ -509,9 +588,10 @@ def analyze_symbol(
     on_stage: Optional[Callable[[str], None]] = None,
 ) -> Analysis:
     scan_cfg = settings.get("scan", {})
-    limit4 = int(scan_cfg.get("limit_4h", 500))
-    limit1 = int(scan_cfg.get("limit_1h", 500))
-    limit15 = int(scan_cfg.get("limit_15m", 500))
+    timeframes_cfg = settings.get("timeframes", {})
+
+    def _limit_for(tf: str, fallback: int = 500) -> int:
+        return int(timeframes_cfg.get(tf, {}).get("limit", scan_cfg.get(f"limit_{tf}", fallback)))
 
     risk_cfg = settings.get("risk", {})
     min_rr2 = float(risk_cfg.get("min_rr2", 2.0))
@@ -519,38 +599,55 @@ def analyze_symbol(
 
     strategy_cfg = settings.get("strategy", {})
     htf_lookback = int(strategy_cfg.get("htf_range_lookback", 200))
+    htf_timeframes = strategy_cfg.get("htf_bias_timeframes", ["1d", "4h"])
+    if isinstance(htf_timeframes, str):
+        htf_timeframes = [htf_timeframes]
+    if not htf_timeframes:
+        htf_timeframes = ["1d", "4h"]
+    htf_min_alignment = float(strategy_cfg.get("htf_min_alignment", 0.6))
+    impulse_tf = strategy_cfg.get("impulse_timeframe", "1h")
+    confirm_tf = strategy_cfg.get("confirm_timeframe", "15m")
+    measurement_tf = strategy_cfg.get("measurement_timeframe", confirm_tf)
 
-    if on_stage:
-        on_stage("fetch 4H")
-    df4 = fetch_ohlcv(symbol, "4h", limit4)
+    tf_cache: Dict[str, pd.DataFrame] = {}
 
-    ema_bias = _trend_bias_ema(df4)
-    pd_bias = _premium_discount_bias(df4, htf_lookback)
+    def _fetch_tf(tf: str) -> pd.DataFrame:
+        if tf not in tf_cache:
+            if on_stage:
+                on_stage(f"fetch {tf.upper()}")
+            tf_cache[tf] = fetch_ohlcv(symbol, tf, _limit_for(tf))
+        return tf_cache[tf]
 
-    if ema_bias == "RANGE" and not pd_bias:
-        return Analysis(status="NO_TRADE", side="-", reason="HTF bias yoxdur (EMA və Premium/Discount)\n")
+    ema_biases: Dict[str, Optional[str]] = {}
+    pd_biases: Dict[str, Optional[str]] = {}
+    for tf in htf_timeframes:
+        df_htf = _fetch_tf(tf)
+        ema_biases[tf] = _trend_bias_ema(df_htf)
+        pd_biases[tf] = _premium_discount_bias(df_htf, htf_lookback)
 
-    if on_stage:
-        on_stage("fetch 1H")
-    df1 = fetch_ohlcv(symbol, "1h", limit1)
+    ema_bias, ema_counts, ema_ratio = _aggregate_bias(ema_biases, htf_min_alignment)
+    pd_bias, pd_counts, pd_ratio = _aggregate_bias(pd_biases, htf_min_alignment)
 
-    if on_stage:
-        on_stage("fetch 15M")
-    df15 = fetch_ohlcv(symbol, "15m", limit15)
+    df_impulse = _fetch_tf(impulse_tf)
+    df_confirm = _fetch_tf(confirm_tf)
+    df_measure = _fetch_tf(measurement_tf)
 
-    atr1 = _atr(df1, 14)
+    atr1 = _atr(df_impulse, 14)
     if not np.isfinite(atr1) or atr1 <= 0:
         return Analysis(status="NO_TRADE", side="-", reason="ATR hesablanmadı")
 
     candidates: List[Analysis] = []
 
-    if ema_bias in ("LONG", "SHORT"):
-        golden = _build_golden_zone_setup(df1, df15, ema_bias, atr1, strategy_cfg)
+    golden_biases = [ema_bias] if ema_bias in ("LONG", "SHORT") else ["LONG", "SHORT"]
+    measurement_biases = [pd_bias] if pd_bias in ("LONG", "SHORT") else ["LONG", "SHORT"]
+
+    for bias in golden_biases:
+        golden = _build_golden_zone_setup(df_impulse, df_confirm, bias, atr1, strategy_cfg)
         if golden:
             candidates.append(golden)
 
-    if pd_bias in ("LONG", "SHORT"):
-        measurement = _build_measurement_setup(df15, pd_bias, atr1, strategy_cfg)
+    for bias in measurement_biases:
+        measurement = _build_measurement_setup(df_measure, bias, atr1, strategy_cfg)
         if measurement:
             candidates.append(measurement)
 
@@ -559,27 +656,72 @@ def analyze_symbol(
 
     best = max(candidates, key=lambda x: x.score)
 
-    dist_atr = abs(float(df1["close"].iloc[-1]) - best.entry) / atr1
+    dist_atr = abs(float(df_impulse["close"].iloc[-1]) - best.entry) / atr1
+    penalty = 1.0
     if dist_atr > max_entry_atr:
-        return Analysis(status="NO_TRADE", side="-", reason=f"Entry çox uzaqdır (dist={dist_atr:.2f} ATR)")
+        penalty *= 0.6
+        best.reason = f"{best.reason} | Entry uzaqdır ({dist_atr:.2f} ATR)"
+        best.status = "SETUP"
 
     if best.rr2 < min_rr2:
-        return Analysis(status="NO_TRADE", side="-", reason=f"RR aşağıdır ({best.rr2:.2f} < {min_rr2})")
+        penalty *= 0.7
+        best.reason = f"{best.reason} | RR aşağıdır ({best.rr2:.2f} < {min_rr2})"
+        best.status = "SETUP"
 
     scoring_cfg = settings.get("scoring", {})
     w_rr2 = float(scoring_cfg.get("w_rr2", 10.0))
     w_trend = float(scoring_cfg.get("w_trend", 5.0))
     w_conf = float(scoring_cfg.get("w_confluence", 3.0))
+    w_conf_count = float(scoring_cfg.get("w_confluence_count", 1.0))
+    w_confirmation = float(scoring_cfg.get("w_confirmation", 2.0))
 
     trend_bonus = 1.0 if best.side == ema_bias else 0.5
     conf_bonus = 1.0 if "(" in best.reason else 0.0
-    best.score = best.rr2 * w_rr2 + trend_bonus * w_trend + conf_bonus * w_conf
+    confluence_count = 0
+    confirmation_bonus = 0.0
+    if best.details:
+        confluence_count = int(best.details.get("confluence_count", 0))
+        if best.details.get("confirmation"):
+            confirmation_bonus = 1.0
+        elif best.details.get("fvg_overlap"):
+            confirmation_bonus = 0.5
+
+    best.score = (
+        best.rr2 * w_rr2
+        + trend_bonus * w_trend
+        + conf_bonus * w_conf
+        + confluence_count * w_conf_count
+        + confirmation_bonus * w_confirmation
+    ) * penalty
     if best.details is not None:
         best.details = {
             **best.details,
             "ema_bias": ema_bias,
             "premium_discount_bias": pd_bias,
             "entry_distance_atr": float(dist_atr),
+            "filters": {
+                "min_rr2": min_rr2,
+                "max_entry_distance_atr": max_entry_atr,
+                "penalty_multiplier": penalty,
+            },
+            "htf_bias_timeframes": htf_timeframes,
+            "htf_bias_alignment_min": htf_min_alignment,
+            "htf_bias_ema_votes": ema_biases,
+            "htf_bias_pd_votes": pd_biases,
+            "htf_bias_ema_counts": ema_counts,
+            "htf_bias_pd_counts": pd_counts,
+            "htf_bias_ema_ratio": float(ema_ratio),
+            "htf_bias_pd_ratio": float(pd_ratio),
+            "impulse_timeframe": impulse_tf,
+            "confirm_timeframe": confirm_tf,
+            "measurement_timeframe": measurement_tf,
+            "score_components": {
+                "rr2": best.rr2 * w_rr2,
+                "trend": trend_bonus * w_trend,
+                "confluence": conf_bonus * w_conf,
+                "confluence_count": confluence_count * w_conf_count,
+                "confirmation": confirmation_bonus * w_confirmation,
+            },
         }
 
     return best
