@@ -20,22 +20,22 @@ class ModernStyle:
     """Modern rəng və stil konfiqurasiyası"""
     
     # Rəng Paleti
-    BG_DARK = "#1e1e2e"
-    BG_MEDIUM = "#2a2a3e"
-    BG_LIGHT = "#363654"
+    BG_DARK = "#121826"
+    BG_MEDIUM = "#1f2736"
+    BG_LIGHT = "#2d3850"
     ACCENT_PRIMARY = "#00d4ff"
     ACCENT_SUCCESS = "#00ff88"
     ACCENT_WARNING = "#ffaa00"
     ACCENT_ERROR = "#ff4444"
-    TEXT_PRIMARY = "#ffffff"
-    TEXT_SECONDARY = "#b4b4c8"
-    BORDER = "#404058"
+    TEXT_PRIMARY = "#f5f7ff"
+    TEXT_SECONDARY = "#c5cbe6"
+    BORDER = "#3a475f"
     
     # Font Konfiqurasiyası
-    FONT_MAIN = ("Segoe UI", 10)
-    FONT_HEADER = ("Segoe UI Semibold", 11)
-    FONT_TITLE = ("Segoe UI Bold", 12)
-    FONT_MONO = ("Consolas", 9)
+    FONT_MAIN = ("Segoe UI", 11)
+    FONT_HEADER = ("Segoe UI Semibold", 12)
+    FONT_TITLE = ("Segoe UI Bold", 14)
+    FONT_MONO = ("Consolas", 10)
 
 
 class AnimatedProgressBar(ttk.Frame):
@@ -423,6 +423,22 @@ class App:
     def _setup_styles(self):
         """TTK stil konfiqurasiyası"""
         style = ttk.Style()
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+
+        style.configure(
+            "TFrame",
+            background=ModernStyle.BG_DARK
+        )
+
+        style.configure(
+            "TLabel",
+            background=ModernStyle.BG_MEDIUM,
+            foreground=ModernStyle.TEXT_PRIMARY,
+            font=ModernStyle.FONT_MAIN
+        )
         
         # Frame stil
         style.configure(
