@@ -246,7 +246,7 @@ class WorkflowDiagram(tk.Canvas):
     def __init__(self, parent, **kwargs):
         super().__init__(
             parent,
-            height=160,
+            height=200,
             bg=ModernStyle.BG_MEDIUM,
             highlightthickness=0,
             bd=0,
@@ -334,16 +334,21 @@ class WorkflowDiagram(tk.Canvas):
             return
 
         padding_x = 24
-        padding_y = 20
+        padding_y = 18
         gap = 16
+        row_gap = 22
         card_height = 64
         card_radius = 14
-        top_y = padding_y + 18
+        top_y = padding_y + 20
 
-        available_width = width - (padding_x * 2) - (gap * (len(self.steps) - 1))
-        card_width = max(90, min(140, int(available_width / len(self.steps))))
-
-        timeline_y = top_y + card_height + 20
+        card_min_width = 88
+        card_max_width = 130
+        usable_width = max(1, width - (padding_x * 2))
+        max_cols = max(1, int((usable_width + gap) / (card_min_width + gap)))
+        cols = min(len(self.steps), max_cols)
+        rows = (len(self.steps) + cols - 1) // cols
+        available_width = usable_width - (gap * (cols - 1))
+        card_width = max(card_min_width, min(card_max_width, int(available_width / cols)))
 
         self.create_text(
             padding_x,
@@ -355,10 +360,12 @@ class WorkflowDiagram(tk.Canvas):
         )
 
         for idx, step in enumerate(self.steps):
-            x0 = padding_x + idx * (card_width + gap)
+            row = idx // cols
+            col = idx % cols
+            x0 = padding_x + col * (card_width + gap)
             x1 = x0 + card_width
-            y0 = top_y
-            y1 = top_y + card_height
+            y0 = top_y + row * (card_height + row_gap)
+            y1 = y0 + card_height
             is_active = idx == self.active_index
             is_complete = self.active_index >= 0 and idx < self.active_index
 
@@ -434,17 +441,20 @@ class WorkflowDiagram(tk.Canvas):
                 font=ModernStyle.FONT_MAIN
             )
 
-            if idx < len(self.steps) - 1:
+            is_row_end = col == cols - 1
+            is_last = idx == len(self.steps) - 1
+            if not is_row_end and not is_last:
                 line_x0 = x1 + 4
                 line_x1 = x1 + gap - 4
+                line_y = y0 + card_height + 10
                 line_color = ModernStyle.TEXT_SECONDARY
                 if is_complete:
                     line_color = ModernStyle.ACCENT_SUCCESS
                 self.create_line(
                     line_x0,
-                    timeline_y,
+                    line_y,
                     line_x1,
-                    timeline_y,
+                    line_y,
                     fill=line_color,
                     width=3,
                     capstyle=tk.ROUND
@@ -452,13 +462,25 @@ class WorkflowDiagram(tk.Canvas):
                 arrow_x = line_x1
                 self.create_polygon(
                     arrow_x - 6,
-                    timeline_y - 5,
+                    line_y - 5,
                     arrow_x,
-                    timeline_y,
+                    line_y,
                     arrow_x - 6,
-                    timeline_y + 5,
+                    line_y + 5,
                     fill=line_color,
                     outline=""
+                )
+            if row < rows - 1 and is_row_end:
+                connector_x = x0 + card_width / 2
+                connector_y0 = y1 + 6
+                connector_y1 = y1 + row_gap - 6
+                self.create_line(
+                    connector_x,
+                    connector_y0,
+                    connector_x,
+                    connector_y1,
+                    fill=ModernStyle.TEXT_SECONDARY,
+                    width=2
                 )
 
 class ModernButton(tk.Canvas):
@@ -834,7 +856,7 @@ class App:
         stats_frame.columnconfigure(3, weight=1)
 
         visuals_frame = ttk.Frame(summary_frame, style="Card.TFrame")
-        visuals_frame.pack(side="right", fill="x")
+        visuals_frame.pack(side="right", fill="both", expand=True)
 
         self.summary_chart = SummaryChart(visuals_frame)
         self.summary_chart.pack(fill="x", pady=(0, 8))
