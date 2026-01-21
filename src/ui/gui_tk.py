@@ -246,22 +246,24 @@ class WorkflowDiagram(tk.Canvas):
     def __init__(self, parent, **kwargs):
         super().__init__(
             parent,
-            height=120,
+            height=160,
             bg=ModernStyle.BG_MEDIUM,
             highlightthickness=0,
             bd=0,
             **kwargs
         )
         self.steps = [
-            "1D Bias",
-            "4H Bias",
-            "1H Impulse",
-            "15M Confirm",
-            "5M Trigger",
-            "Score",
-            "Report",
+            {"title": "1D", "subtitle": "Bias"},
+            {"title": "4H", "subtitle": "Bias"},
+            {"title": "1H", "subtitle": "Impulse"},
+            {"title": "15M", "subtitle": "Confirm"},
+            {"title": "5M", "subtitle": "Trigger"},
+            {"title": "Score", "subtitle": "Evaluate"},
+            {"title": "Report", "subtitle": "Export"},
         ]
         self.active_index = -1
+        self._pulse_active = False
+        self._pulse_phase = 0
         self.bind("<Configure>", lambda _: self._draw())
 
     def set_stage(self, stage_text: str) -> None:
@@ -287,11 +289,42 @@ class WorkflowDiagram(tk.Canvas):
                 idx = 6
         if idx is not None:
             self.active_index = idx
+            self._start_pulse()
             self._draw()
 
     def reset(self) -> None:
         self.active_index = -1
+        self._pulse_active = False
         self._draw()
+
+    def _start_pulse(self):
+        if not self._pulse_active:
+            self._pulse_active = True
+            self._pulse()
+
+    def _pulse(self):
+        if not self._pulse_active or self.active_index < 0:
+            return
+        self._pulse_phase = (self._pulse_phase + 1) % 4
+        self._draw()
+        self.after(220, self._pulse)
+
+    def _rounded_rect(self, x0, y0, x1, y1, radius=12, **kwargs):
+        points = [
+            x0 + radius, y0,
+            x1 - radius, y0,
+            x1, y0,
+            x1, y0 + radius,
+            x1, y1 - radius,
+            x1, y1,
+            x1 - radius, y1,
+            x0 + radius, y1,
+            x0, y1,
+            x0, y1 - radius,
+            x0, y0 + radius,
+            x0, y0,
+        ]
+        return self.create_polygon(points, smooth=True, **kwargs)
 
     def _draw(self):
         self.delete("all")
@@ -300,35 +333,132 @@ class WorkflowDiagram(tk.Canvas):
         if width <= 1 or height <= 1:
             return
 
-        step_width = int(width / len(self.steps))
-        center_y = height // 2
+        padding_x = 24
+        padding_y = 20
+        gap = 16
+        card_height = 64
+        card_radius = 14
+        top_y = padding_y + 18
 
-        for idx, label in enumerate(self.steps):
-            x0 = idx * step_width + 10
-            x1 = (idx + 1) * step_width - 10
-            color = ModernStyle.ACCENT_PRIMARY if idx == self.active_index else ModernStyle.BG_LIGHT
-            text_color = ModernStyle.TEXT_PRIMARY if idx == self.active_index else ModernStyle.TEXT_SECONDARY
+        available_width = width - (padding_x * 2) - (gap * (len(self.steps) - 1))
+        card_width = max(90, min(140, int(available_width / len(self.steps))))
 
-            self.create_rectangle(
-                x0, center_y - 16, x1, center_y + 16,
-                fill=color,
-                outline=ModernStyle.BORDER
+        timeline_y = top_y + card_height + 20
+
+        self.create_text(
+            padding_x,
+            padding_y,
+            text="Workflow",
+            fill=ModernStyle.TEXT_SECONDARY,
+            anchor="w",
+            font=ModernStyle.FONT_HEADER
+        )
+
+        for idx, step in enumerate(self.steps):
+            x0 = padding_x + idx * (card_width + gap)
+            x1 = x0 + card_width
+            y0 = top_y
+            y1 = top_y + card_height
+            is_active = idx == self.active_index
+            is_complete = self.active_index >= 0 and idx < self.active_index
+
+            shadow_color = "#0c111b"
+            self._rounded_rect(
+                x0 + 2,
+                y0 + 2,
+                x1 + 2,
+                y1 + 2,
+                radius=card_radius,
+                fill=shadow_color,
+                outline=""
+            )
+
+            base_color = ModernStyle.BG_LIGHT
+            border_color = ModernStyle.BORDER
+            text_color = ModernStyle.TEXT_SECONDARY
+            subtitle_color = ModernStyle.TEXT_SECONDARY
+
+            if is_complete:
+                base_color = "#223349"
+                border_color = ModernStyle.ACCENT_SUCCESS
+                text_color = ModernStyle.TEXT_PRIMARY
+                subtitle_color = ModernStyle.TEXT_SECONDARY
+
+            if is_active:
+                base_color = "#1c3551"
+                border_color = ModernStyle.ACCENT_PRIMARY
+                text_color = ModernStyle.TEXT_PRIMARY
+                subtitle_color = ModernStyle.TEXT_SECONDARY
+
+                glow_colors = [
+                    ModernStyle.ACCENT_PRIMARY,
+                    ModernStyle.ACCENT_SUCCESS,
+                    ModernStyle.ACCENT_PRIMARY,
+                    "#4fd3ff",
+                ]
+                glow_color = glow_colors[self._pulse_phase]
+                self._rounded_rect(
+                    x0 - 4,
+                    y0 - 4,
+                    x1 + 4,
+                    y1 + 4,
+                    radius=card_radius + 2,
+                    fill="",
+                    outline=glow_color,
+                    width=2
+                )
+
+            self._rounded_rect(
+                x0,
+                y0,
+                x1,
+                y1,
+                radius=card_radius,
+                fill=base_color,
+                outline=border_color,
+                width=1
+            )
+
+            self.create_text(
+                (x0 + x1) / 2,
+                y0 + 24,
+                text=step["title"],
+                fill=text_color,
+                font=ModernStyle.FONT_HEADER
             )
             self.create_text(
                 (x0 + x1) / 2,
-                center_y,
-                text=label,
-                fill=text_color,
+                y0 + 44,
+                text=step["subtitle"],
+                fill=subtitle_color,
                 font=ModernStyle.FONT_MAIN
             )
+
             if idx < len(self.steps) - 1:
+                line_x0 = x1 + 4
+                line_x1 = x1 + gap - 4
+                line_color = ModernStyle.TEXT_SECONDARY
+                if is_complete:
+                    line_color = ModernStyle.ACCENT_SUCCESS
                 self.create_line(
-                    x1 + 2,
-                    center_y,
-                    x1 + 12,
-                    center_y,
-                    fill=ModernStyle.TEXT_SECONDARY,
-                    width=2
+                    line_x0,
+                    timeline_y,
+                    line_x1,
+                    timeline_y,
+                    fill=line_color,
+                    width=3,
+                    capstyle=tk.ROUND
+                )
+                arrow_x = line_x1
+                self.create_polygon(
+                    arrow_x - 6,
+                    timeline_y - 5,
+                    arrow_x,
+                    timeline_y,
+                    arrow_x - 6,
+                    timeline_y + 5,
+                    fill=line_color,
+                    outline=""
                 )
 
 class ModernButton(tk.Canvas):
