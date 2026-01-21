@@ -94,6 +94,7 @@ def load_settings(path: str) -> Dict[str, Any]:
             "scoring": {
                 "w_rr2": 10.0,
                 "w_trend": 5.0,
+                "w_trend_strength": 3.0,
                 "w_confluence": 3.0,
                 "w_confluence_count": 1.0,
                 "w_confirmation": 2.0,
@@ -101,6 +102,7 @@ def load_settings(path: str) -> Dict[str, Any]:
                 "w_alignment": 2.0,
                 "w_entry_distance": 1.0,
                 "w_zone": 2.0,
+                "w_zone_balance": 1.0,
                 "w_status": 2.0,
                 "rr2_target": 6.0,
                 "confluence_target": 3,

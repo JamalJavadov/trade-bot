@@ -190,6 +190,30 @@ def _is_strong_trend(
     return slope_atr >= min_slope_atr and ema_separation_atr >= min_ema_separation_atr
 
 
+def _trend_strength_score(
+    df: pd.DataFrame,
+    side: str,
+    atr: float,
+    slope_lookback: int,
+    min_slope_atr: float,
+    min_ema_separation_atr: float,
+) -> float:
+    if len(df) < 220 or not np.isfinite(atr) or atr <= 0:
+        return 0.0
+    ema50 = _ema(df["close"], 50)
+    ema200 = _ema(df["close"], 200)
+    slope = ema50.iloc[-1] - ema50.iloc[-slope_lookback]
+    if side == "LONG" and slope <= 0:
+        return 0.0
+    if side == "SHORT" and slope >= 0:
+        return 0.0
+    slope_atr = abs(float(slope)) / atr
+    ema_separation_atr = abs(float(ema50.iloc[-1] - ema200.iloc[-1])) / atr
+    slope_score = _clamp(slope_atr / max(min_slope_atr, 1e-6))
+    separation_score = _clamp(ema_separation_atr / max(min_ema_separation_atr, 1e-6))
+    return (slope_score + separation_score) / 2.0
+
+
 def _zone_bounds(a: float, b: float) -> Tuple[float, float]:
     return (min(a, b), max(a, b))
 
@@ -815,7 +839,8 @@ def analyze_symbol(
 
     best = max(eligible, key=lambda x: x.score)
 
-    dist_atr = abs(float(df_impulse["close"].iloc[-1]) - best.entry) / atr1
+    last_close = float(df_impulse["close"].iloc[-1])
+    dist_atr = abs(last_close - best.entry) / atr1
     penalty = 1.0
     if dist_atr > max_entry_atr:
         penalty *= 0.6
@@ -851,6 +876,7 @@ def analyze_symbol(
     scoring_cfg = settings.get("scoring", {})
     w_rr2 = float(scoring_cfg.get("w_rr2", 10.0))
     w_trend = float(scoring_cfg.get("w_trend", 5.0))
+    w_trend_strength = float(scoring_cfg.get("w_trend_strength", 3.0))
     w_conf = float(scoring_cfg.get("w_confluence", 3.0))
     w_conf_count = float(scoring_cfg.get("w_confluence_count", 1.0))
     w_confirmation = float(scoring_cfg.get("w_confirmation", 2.0))
@@ -858,6 +884,7 @@ def analyze_symbol(
     w_alignment = float(scoring_cfg.get("w_alignment", 2.0))
     w_entry_distance = float(scoring_cfg.get("w_entry_distance", 1.0))
     w_zone = float(scoring_cfg.get("w_zone", 2.0))
+    w_zone_balance = float(scoring_cfg.get("w_zone_balance", 1.0))
     w_status = float(scoring_cfg.get("w_status", 2.0))
     rr2_target = float(scoring_cfg.get("rr2_target", 6.0))
     confluence_target = int(scoring_cfg.get("confluence_target", 3))
@@ -879,33 +906,52 @@ def analyze_symbol(
         elif best.details.get("fvg_overlap"):
             confirmation_score = 0.5
 
-    alignment_ratio = max(float(ema_ratio), float(pd_ratio))
+    alignment_ratio = (float(ema_ratio) + float(pd_ratio)) / 2.0
     alignment_score = 0.0
     if htf_min_alignment < 1.0:
         alignment_score = max(0.0, min(1.0, (alignment_ratio - htf_min_alignment) / (1.0 - htf_min_alignment)))
     entry_distance_score = 1.0 - min(1.0, dist_atr / max_entry_atr) if max_entry_atr > 0 else 0.0
-    rr2_score = _clamp((best.rr2 - min_rr2) / (rr2_target - min_rr2)) if rr2_target > min_rr2 else _clamp(best.rr2 / max(min_rr2, 1e-6))
+    rr2_score = _clamp(best.rr2 / max(rr2_target, 1e-6))
     min_conf = int(strategy_cfg.get("min_confluence", 1))
     confluence_presence = 1.0 if confluence_count >= min_conf else 0.5 if confluence_count > 0 else 0.0
     confluence_score = _clamp(confluence_count / max(1, confluence_target))
     status_score = 1.0 if best.status == "OK" else 0.6
 
     zone_score = 0.0
+    zone_balance_score = 0.0
     dist_to_zone_atr = None
     in_zone = False
+    zone_low = None
+    zone_high = None
     if best.details:
         in_zone = bool(best.details.get("in_zone", False))
         dist_to_zone_atr = best.details.get("dist_to_zone_atr")
+        zone_low = best.details.get("zone_low", best.details.get("entry_zone_low"))
+        zone_high = best.details.get("zone_high", best.details.get("entry_zone_high"))
     if in_zone:
         zone_score = 1.0
     elif dist_to_zone_atr is not None:
         max_pre_zone_atr = float(strategy_cfg.get("max_pre_zone_atr", 1.5))
         if max_pre_zone_atr > 0:
             zone_score = _clamp(1.0 - (float(dist_to_zone_atr) / max_pre_zone_atr))
+    if in_zone and zone_low is not None and zone_high is not None:
+        mid = (float(zone_low) + float(zone_high)) / 2.0
+        half_range = max(abs(float(zone_high) - float(zone_low)) / 2.0, 1e-9)
+        zone_balance_score = _clamp(1.0 - abs(last_close - mid) / half_range)
+
+    trend_strength_score = _trend_strength_score(
+        df_impulse,
+        best.side,
+        atr1,
+        int(strategy_cfg.get("strong_trend_slope_lookback", 8)),
+        float(strategy_cfg.get("strong_trend_slope_atr", 0.12)),
+        float(strategy_cfg.get("strong_trend_ema_separation_atr", 0.3)),
+    )
 
     total_weight = (
         w_rr2
         + w_trend
+        + w_trend_strength
         + w_conf
         + w_conf_count
         + w_confirmation
@@ -913,11 +959,13 @@ def analyze_symbol(
         + w_alignment
         + w_entry_distance
         + w_zone
+        + w_zone_balance
         + w_status
     )
     weighted_sum = (
         rr2_score * w_rr2
         + trend_score * w_trend
+        + trend_strength_score * w_trend_strength
         + confluence_presence * w_conf
         + confluence_score * w_conf_count
         + confirmation_score * w_confirmation
@@ -925,6 +973,7 @@ def analyze_symbol(
         + alignment_score * w_alignment
         + entry_distance_score * w_entry_distance
         + zone_score * w_zone
+        + zone_balance_score * w_zone_balance
         + status_score * w_status
     )
     quality_score = 0.0
@@ -975,6 +1024,10 @@ def analyze_symbol(
                     "normalized": trend_score,
                     "weighted": trend_score * w_trend,
                 },
+                "trend_strength": {
+                    "normalized": trend_strength_score,
+                    "weighted": trend_strength_score * w_trend_strength,
+                },
                 "confluence_presence": {
                     "raw": confluence_count,
                     "normalized": confluence_presence,
@@ -1006,6 +1059,10 @@ def analyze_symbol(
                 "zone_proximity": {
                     "normalized": zone_score,
                     "weighted": zone_score * w_zone,
+                },
+                "zone_balance": {
+                    "normalized": zone_balance_score,
+                    "weighted": zone_balance_score * w_zone_balance,
                 },
                 "status": {
                     "raw": best.status,
