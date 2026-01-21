@@ -684,6 +684,9 @@ class App:
         
         # Style konfiqurasiyası
         self._setup_styles()
+
+        # Scrollable əsas kontent
+        self._create_scroll_container()
         
         # UI Elementləri
         self._create_header()
@@ -694,6 +697,60 @@ class App:
         
         # Queue polling
         self.root.after(120, self._poll_queue)
+
+    def _create_scroll_container(self) -> None:
+        self.page_container = ttk.Frame(self.root, style="Dark.TFrame")
+        self.page_container.pack(fill="both", expand=True)
+
+        self.page_canvas = tk.Canvas(
+            self.page_container,
+            bg=ModernStyle.BG_DARK,
+            highlightthickness=0,
+            bd=0,
+        )
+        self.page_scrollbar = ttk.Scrollbar(
+            self.page_container,
+            orient="vertical",
+            command=self.page_canvas.yview,
+        )
+        self.page_canvas.configure(yscrollcommand=self.page_scrollbar.set)
+
+        self.page_scrollbar.pack(side="right", fill="y")
+        self.page_canvas.pack(side="left", fill="both", expand=True)
+
+        self.page_frame = ttk.Frame(
+            self.page_canvas,
+            style="Dark.TFrame",
+            padding=(0, 10),
+        )
+        self.page_window = self.page_canvas.create_window(
+            (0, 0),
+            window=self.page_frame,
+            anchor="nw",
+        )
+
+        def on_frame_configure(_event):
+            self.page_canvas.configure(scrollregion=self.page_canvas.bbox("all"))
+
+        def on_canvas_configure(event):
+            self.page_canvas.itemconfigure(self.page_window, width=event.width)
+
+        self.page_frame.bind("<Configure>", on_frame_configure)
+        self.page_canvas.bind("<Configure>", on_canvas_configure)
+        self._bind_page_scroll()
+
+    def _bind_page_scroll(self) -> None:
+        def on_mousewheel(event):
+            if hasattr(event, "delta") and event.delta:
+                self.page_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            elif getattr(event, "num", None) == 4:
+                self.page_canvas.yview_scroll(-3, "units")
+            elif getattr(event, "num", None) == 5:
+                self.page_canvas.yview_scroll(3, "units")
+
+        self.page_canvas.bind_all("<MouseWheel>", on_mousewheel)
+        self.page_canvas.bind_all("<Button-4>", on_mousewheel)
+        self.page_canvas.bind_all("<Button-5>", on_mousewheel)
     
     def _setup_styles(self):
         """TTK stil konfiqurasiyası"""
@@ -806,7 +863,7 @@ class App:
     
     def _create_header(self):
         """Header bölməsi"""
-        header = ttk.Frame(self.root, style="Dark.TFrame", padding=18)
+        header = ttk.Frame(self.page_frame, style="Dark.TFrame", padding=18)
         header.pack(fill="x")
         
         # Title
@@ -849,7 +906,7 @@ class App:
     def _create_parameters_section(self):
         """Parametrlər bölməsi"""
         params_card = ttk.LabelFrame(
-            self.root,
+            self.page_frame,
             text="⚙️  Parametrlər",
             style="Card.TLabelframe",
             padding=20
@@ -937,7 +994,7 @@ class App:
     def _create_symbols_section(self):
         """Simvol seçimi bölməsi"""
         symbols_card = ttk.LabelFrame(
-            self.root,
+            self.page_frame,
             text="🧩 Simvol Seçimi",
             style="Card.TLabelframe",
             padding=20
@@ -1029,7 +1086,7 @@ class App:
     def _create_scan_section(self):
         """Scan bölməsi"""
         scan_card = ttk.LabelFrame(
-            self.root,
+            self.page_frame,
             text="🔍 Skan",
             style="Card.TLabelframe",
             padding=20
@@ -1100,7 +1157,7 @@ class App:
     def _create_output_section(self):
         """Output bölməsi"""
         output_card = ttk.LabelFrame(
-            self.root,
+            self.page_frame,
             text="📄 Nəticələr",
             style="Card.TLabelframe",
             padding=15
@@ -1459,7 +1516,7 @@ class App:
         for col in range(6):
             pending_grid.columnconfigure(col, weight=1)
 
-        ttk.Separator(content_frame, orient="horizontal").pack(fill="x", pady=(12, 8))
+        ttk.Separator(output_card, orient="horizontal").pack(fill="x", pady=(12, 8))
 
         ttk.Label(
             content_frame,
