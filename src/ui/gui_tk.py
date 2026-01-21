@@ -627,6 +627,7 @@ class App:
         # UI Elementləri
         self._create_header()
         self._create_parameters_section()
+        self._create_symbols_section()
         self._create_scan_section()
         self._create_output_section()
         
@@ -724,6 +725,22 @@ class App:
             background=ModernStyle.BG_MEDIUM,
             foreground=ModernStyle.ACCENT_PRIMARY,
             font=ModernStyle.FONT_HEADER
+        )
+
+        style.configure(
+            "Modern.TRadiobutton",
+            background=ModernStyle.BG_MEDIUM,
+            foreground=ModernStyle.TEXT_PRIMARY,
+            font=ModernStyle.FONT_MAIN
+        )
+
+        style.configure(
+            "Modern.TSpinbox",
+            fieldbackground=ModernStyle.BG_LIGHT,
+            foreground=ModernStyle.TEXT_PRIMARY,
+            background=ModernStyle.BG_MEDIUM,
+            borderwidth=1,
+            relief="flat"
         )
     
     def _create_header(self):
@@ -855,7 +872,99 @@ class App:
             font=ModernStyle.FONT_MAIN
         )
         entry.grid(row=1, column=col*2, sticky="w", padx=(0, 20))
-    
+
+    def _create_symbols_section(self):
+        """Simvol seçimi bölməsi"""
+        symbols_card = ttk.LabelFrame(
+            self.root,
+            text="🧩 Simvol Seçimi",
+            style="Card.TLabelframe",
+            padding=20
+        )
+        symbols_card.pack(fill="x", padx=15, pady=5)
+
+        ttk.Label(
+            symbols_card,
+            text="Skan üçün coin seçim mənbəyini və Top limit dəyərini buradan tənzimlə.",
+            style="Muted.TLabel"
+        ).pack(anchor="w", pady=(0, 10))
+
+        symbols_settings = self.settings.get("symbols", {})
+        if bool(symbols_settings.get("auto_top_usdtm", False)):
+            mode = "top"
+        elif bool(symbols_settings.get("auto_all_usdtm", False)):
+            mode = "all"
+        else:
+            mode = "manual"
+
+        self.symbol_mode_var = tk.StringVar(value=mode)
+        self.top_limit_var = tk.IntVar(value=int(symbols_settings.get("top_limit", 200)))
+
+        modes_frame = ttk.Frame(symbols_card, style="Card.TFrame")
+        modes_frame.pack(fill="x")
+
+        ttk.Radiobutton(
+            modes_frame,
+            text="Top USDT-M (həcmə görə)",
+            variable=self.symbol_mode_var,
+            value="top",
+            style="Modern.TRadiobutton",
+            command=self._update_symbols_controls
+        ).grid(row=0, column=0, sticky="w", padx=(0, 18), pady=4)
+
+        ttk.Radiobutton(
+            modes_frame,
+            text="Bütün USDT-M",
+            variable=self.symbol_mode_var,
+            value="all",
+            style="Modern.TRadiobutton",
+            command=self._update_symbols_controls
+        ).grid(row=0, column=1, sticky="w", padx=(0, 18), pady=4)
+
+        ttk.Radiobutton(
+            modes_frame,
+            text="Manual (settings.json list)",
+            variable=self.symbol_mode_var,
+            value="manual",
+            style="Modern.TRadiobutton",
+            command=self._update_symbols_controls
+        ).grid(row=0, column=2, sticky="w", pady=4)
+
+        limit_frame = ttk.Frame(symbols_card, style="Card.TFrame")
+        limit_frame.pack(fill="x", pady=(8, 0))
+
+        ttk.Label(
+            limit_frame,
+            text="Top limit:",
+            style="Normal.TLabel"
+        ).grid(row=0, column=0, sticky="w", padx=(0, 8))
+
+        self.top_limit_spinbox = ttk.Spinbox(
+            limit_frame,
+            from_=1,
+            to=1000,
+            textvariable=self.top_limit_var,
+            width=8,
+            style="Modern.TSpinbox",
+            font=ModernStyle.FONT_MAIN
+        )
+        self.top_limit_spinbox.grid(row=0, column=1, sticky="w")
+
+        ttk.Label(
+            limit_frame,
+            text="(1-1000 arası, məsələn 10, 20, 200)",
+            style="Muted.TLabel"
+        ).grid(row=0, column=2, sticky="w", padx=(10, 0))
+
+        self._update_symbols_controls()
+
+    def _update_symbols_controls(self):
+        mode = self.symbol_mode_var.get()
+        if mode == "top":
+            self.top_limit_spinbox.configure(state="normal")
+        else:
+            self.top_limit_spinbox.configure(state="disabled")
+
     def _create_scan_section(self):
         """Scan bölməsi"""
         scan_card = ttk.LabelFrame(
@@ -1178,6 +1287,17 @@ class App:
         self.settings.setdefault("budget", {})["default_usdt"] = float(self.budget_var.get())
         self.settings.setdefault("risk", {})["risk_pct"] = float(self.risk_pct_var.get())
         self.settings.setdefault("risk", {})["leverage"] = int(self.lev_var.get())
+        symbols_settings = self.settings.setdefault("symbols", {})
+        mode = self.symbol_mode_var.get()
+        symbols_settings["auto_top_usdtm"] = mode == "top"
+        symbols_settings["auto_all_usdtm"] = mode == "all"
+        try:
+            top_limit = int(self.top_limit_var.get())
+        except (ValueError, tk.TclError):
+            top_limit = int(symbols_settings.get("top_limit", 200))
+        top_limit = max(1, top_limit)
+        symbols_settings["top_limit"] = top_limit
+        self.top_limit_var.set(top_limit)
         
         save_settings("settings.json", self.settings)
         self.symbols_count_var.set(self._symbols_count_text())
