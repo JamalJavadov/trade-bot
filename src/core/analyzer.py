@@ -678,7 +678,7 @@ def analyze_symbol(
         return int(timeframes_cfg.get(tf, {}).get("limit", scan_cfg.get(f"limit_{tf}", fallback)))
 
     risk_cfg = settings.get("risk", {})
-    min_rr2 = float(risk_cfg.get("min_rr2", 2.0))
+    min_rr2 = float(risk_cfg.get("min_rr2", 3.0))
     max_entry_atr = float(risk_cfg.get("max_entry_distance_atr", 2.0))
 
     strategy_cfg = settings.get("strategy", {})
@@ -736,11 +736,12 @@ def analyze_symbol(
         if measurement:
             candidates.append(measurement)
 
-    if not candidates:
+    eligible = [c for c in candidates if c.rr2 >= min_rr2]
+    if not eligible:
         fallback_side = _fallback_bias(ema_bias, pd_bias, df_impulse)
         if fallback_side:
             fallback = _build_fallback_setup(df_impulse, fallback_side, atr1, min_rr2, strategy_cfg)
-            if fallback:
+            if fallback and fallback.rr2 >= min_rr2:
                 if fallback.details is not None:
                     fallback.details = {
                         **fallback.details,
@@ -751,20 +752,19 @@ def analyze_symbol(
                         "measurement_timeframe": measurement_tf,
                     }
                 return fallback
-        return Analysis(status="NO_TRADE", side="-", reason="Uyğun setup tapılmadı (Codex filtrləri)")
+        return Analysis(
+            status="NO_TRADE",
+            side="-",
+            reason=f"RR hədəfi {min_rr2:.2f} qarşılanmadı (3x1 qaydası)",
+        )
 
-    best = max(candidates, key=lambda x: x.score)
+    best = max(eligible, key=lambda x: x.score)
 
     dist_atr = abs(float(df_impulse["close"].iloc[-1]) - best.entry) / atr1
     penalty = 1.0
     if dist_atr > max_entry_atr:
         penalty *= 0.6
         best.reason = f"{best.reason} | Entry uzaqdır ({dist_atr:.2f} ATR)"
-        best.status = "SETUP"
-
-    if best.rr2 < min_rr2:
-        penalty *= 0.7
-        best.reason = f"{best.reason} | RR aşağıdır ({best.rr2:.2f} < {min_rr2})"
         best.status = "SETUP"
 
     if on_stage:

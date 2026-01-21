@@ -64,7 +64,7 @@ def load_settings(path: str) -> Dict[str, Any]:
             "risk": {
                 "risk_pct": 0.10,
                 "leverage": 3,
-                "min_rr2": 2.0,
+                "min_rr2": 3.0,
                 "max_entry_distance_atr": 2.0,
                 "sl_atr_mult": 1.2,
             },
@@ -316,6 +316,9 @@ def format_report(
     lines.append("Scan başladı.\n")
     lines.append("=== Scan Summary ===")
     lines.append(f"OK: {len(ok)} | SETUP: {len(setups)} | NO_TRADE: {len(no)} | TOTAL: {len(results)}\n")
+    min_rr2 = float(settings.get("risk", {}).get("min_rr2", 3.0))
+    lines.append(f"Risk/Reward qaydası: minimum RR2 = {min_rr2:.2f} (3x1)")
+    lines.append("")
 
     if top_reasons:
         lines.append("=== NO_TRADE Top Səbəblər ===")
