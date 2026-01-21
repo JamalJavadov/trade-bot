@@ -175,6 +175,7 @@
     "strong_trend_ema_separation_atr": 0.3,
     "tp2_extension_level": -0.618,
     "best_requires_ok": true,
+    "force_best_plan": true,
     "allow_weak_confluence": false,
     "allow_pre_zone": false,
     "max_pre_zone_atr": 1.5,

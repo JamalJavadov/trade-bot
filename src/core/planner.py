@@ -83,6 +83,7 @@ def load_settings(path: str) -> Dict[str, Any]:
                 "require_confluence": True,
                 "allow_setup_if_no_confirm": False,
                 "best_requires_ok": True,
+                "force_best_plan": True,
                 "allow_weak_confluence": False,
                 "allow_pre_zone": False,
                 "max_pre_zone_atr": 1.5,

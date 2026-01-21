@@ -1077,9 +1077,25 @@ def analyze_symbol(
             },
         }
 
+    force_best_plan = bool(strategy_cfg.get("force_best_plan", True))
     if best.status == "SETUP" and quality_score < min_setup_quality_pct:
-        best.status = "NO_TRADE"
-        best.side = "-"
-        best.reason = f"Setup keyfiyyəti {quality_score:.1f}% < tələb olunan {min_setup_quality_pct:.1f}%"
+        if force_best_plan:
+            best.reason = (
+                f"{best.reason} | Setup keyfiyyəti {quality_score:.1f}% < tələb olunan "
+                f"{min_setup_quality_pct:.1f}% (force_best_plan=ON)"
+            )
+            if best.details is not None:
+                best.details = {
+                    **best.details,
+                    "quality_gate": {
+                        "min_setup_quality_pct": float(min_setup_quality_pct),
+                        "quality_pct": float(quality_score),
+                        "force_best_plan": True,
+                    },
+                }
+        else:
+            best.status = "NO_TRADE"
+            best.side = "-"
+            best.reason = f"Setup keyfiyyəti {quality_score:.1f}% < tələb olunan {min_setup_quality_pct:.1f}%"
 
     return best
