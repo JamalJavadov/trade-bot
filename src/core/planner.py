@@ -326,26 +326,14 @@ def format_report(
             lines.append(f"- {v}x: {k}")
         lines.append("")
 
-    # show top candidates
-    def _top(lst: List[ScanResult], n: int = 10) -> List[ScanResult]:
-        return sorted(lst, key=lambda r: r.score, reverse=True)[:n]
-
-    lines.append("=== TOP SUITABILITY (All Coins) ===")
-    for r in _top(results, 12):
-        lines.append(f"{r.symbol}: {r.status} | {r.side} | fit={r.probability:.1f}% | score={r.score:.2f}")
+    # show coin list sorted by probability
+    sorted_results = sorted(results, key=lambda r: r.probability, reverse=True)
+    lines.append("=== COIN LIST (Ehtimala görə sıralı) ===")
+    for r in sorted_results:
+        lines.append(
+            f"{r.symbol}: {r.status} | {r.side} | fit={r.probability:.1f}% | RR2={r.rr2:.2f} | score={r.score:.2f}"
+        )
     lines.append("")
-
-    if ok:
-        lines.append("=== TOP OK (Ready) ===")
-        for r in _top(ok, 10):
-            lines.append(f"{r.symbol}: {r.side} | RR2={r.rr2:.2f} | fit={r.probability:.1f}% | score={r.score:.2f}")
-        lines.append("")
-
-    if setups:
-        lines.append("=== TOP SETUP (Watch) ===")
-        for r in _top(setups, 10):
-            lines.append(f"{r.symbol}: {r.side} | RR2={r.rr2:.2f} | fit={r.probability:.1f}% | score={r.score:.2f}")
-        lines.append("")
 
     lines.append("=== BEST PLAN ===")
     if not best:
