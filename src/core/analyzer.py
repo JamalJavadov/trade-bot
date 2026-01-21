@@ -219,6 +219,46 @@ def _bearish_engulfing(df: pd.DataFrame) -> bool:
             and c2["open"] >= c1["close"] and c2["close"] <= c1["open"])
 
 
+def _morning_star(df: pd.DataFrame) -> bool:
+    if len(df) < 3:
+        return False
+    c1 = df.iloc[-3]
+    c2 = df.iloc[-2]
+    c3 = df.iloc[-1]
+    body1 = abs(c1["close"] - c1["open"])
+    body2 = abs(c2["close"] - c2["open"])
+    body3 = abs(c3["close"] - c3["open"])
+    if body1 == 0 or body3 == 0:
+        return False
+    midpoint = c1["open"] - body1 / 2 if c1["close"] < c1["open"] else c1["open"] + body1 / 2
+    return (
+        c1["close"] < c1["open"]
+        and body2 <= body1 * 0.5
+        and c3["close"] > c3["open"]
+        and c3["close"] >= midpoint
+    )
+
+
+def _evening_star(df: pd.DataFrame) -> bool:
+    if len(df) < 3:
+        return False
+    c1 = df.iloc[-3]
+    c2 = df.iloc[-2]
+    c3 = df.iloc[-1]
+    body1 = abs(c1["close"] - c1["open"])
+    body2 = abs(c2["close"] - c2["open"])
+    body3 = abs(c3["close"] - c3["open"])
+    if body1 == 0 or body3 == 0:
+        return False
+    midpoint = c1["open"] + body1 / 2 if c1["close"] > c1["open"] else c1["open"] - body1 / 2
+    return (
+        c1["close"] > c1["open"]
+        and body2 <= body1 * 0.5
+        and c3["close"] < c3["open"]
+        and c3["close"] <= midpoint
+    )
+
+
 def _rejection_wick(df: pd.DataFrame, side: str, zone_low: float, zone_high: float) -> bool:
     if len(df) < 1:
         return False
@@ -345,13 +385,32 @@ def _build_golden_zone_setup(
         weak_confluence = True
 
     confirmation = False
+    confirmation_pattern = None
     if in_zone:
         if side == "LONG":
-            confirmation = _bullish_engulfing(df_confirm) or _rejection_wick(df_confirm, "LONG", z_low, z_high)
+            if _bullish_engulfing(df_confirm):
+                confirmation = True
+                confirmation_pattern = "bullish_engulfing"
+            elif _morning_star(df_confirm):
+                confirmation = True
+                confirmation_pattern = "morning_star"
+            elif _rejection_wick(df_confirm, "LONG", z_low, z_high):
+                confirmation = True
+                confirmation_pattern = "rejection_wick"
         else:
-            confirmation = _bearish_engulfing(df_confirm) or _rejection_wick(df_confirm, "SHORT", z_low, z_high)
+            if _bearish_engulfing(df_confirm):
+                confirmation = True
+                confirmation_pattern = "bearish_engulfing"
+            elif _evening_star(df_confirm):
+                confirmation = True
+                confirmation_pattern = "evening_star"
+            elif _rejection_wick(df_confirm, "SHORT", z_low, z_high):
+                confirmation = True
+                confirmation_pattern = "rejection_wick"
         if confirmation:
             confirmation = _golden_respect(df_confirm, side, z_low, z_high, tol)
+            if not confirmation:
+                confirmation_pattern = None
 
     entry = last_close if confirmation and in_zone else (z_low + z_high) / 2.0
     sl_buffer = float(cfg.get("sl_atr_mult", 1.2))
@@ -414,7 +473,9 @@ def _build_golden_zone_setup(
             "near_zone": bool(near_zone),
             "dist_to_zone_atr": float(dist_to_zone / atr) if atr else None,
             "confirmation": bool(confirmation),
+            "confirmation_pattern": confirmation_pattern,
             "confluences": confluences,
+            "confluence_count": int(len(confluences)),
             "weak_confluence": bool(weak_confluence),
             "atr": float(atr),
         },
@@ -495,6 +556,7 @@ def _build_measurement_setup(
             "entry_zone_low": float(zone_low),
             "entry_zone_high": float(zone_high),
             "fvg_overlap": bool(fvg_overlap),
+            "confluence_count": int(1 if fvg_overlap else 0),
             "atr": float(atr),
             "sweep_idx": int(sweep_idx),
             "bos_idx": int(bos_idx),
@@ -570,16 +632,40 @@ def analyze_symbol(
     w_rr2 = float(scoring_cfg.get("w_rr2", 10.0))
     w_trend = float(scoring_cfg.get("w_trend", 5.0))
     w_conf = float(scoring_cfg.get("w_confluence", 3.0))
+    w_conf_count = float(scoring_cfg.get("w_confluence_count", 1.0))
+    w_confirmation = float(scoring_cfg.get("w_confirmation", 2.0))
 
     trend_bonus = 1.0 if best.side == ema_bias else 0.5
     conf_bonus = 1.0 if "(" in best.reason else 0.0
-    best.score = best.rr2 * w_rr2 + trend_bonus * w_trend + conf_bonus * w_conf
+    confluence_count = 0
+    confirmation_bonus = 0.0
+    if best.details:
+        confluence_count = int(best.details.get("confluence_count", 0))
+        if best.details.get("confirmation"):
+            confirmation_bonus = 1.0
+        elif best.details.get("fvg_overlap"):
+            confirmation_bonus = 0.5
+
+    best.score = (
+        best.rr2 * w_rr2
+        + trend_bonus * w_trend
+        + conf_bonus * w_conf
+        + confluence_count * w_conf_count
+        + confirmation_bonus * w_confirmation
+    )
     if best.details is not None:
         best.details = {
             **best.details,
             "ema_bias": ema_bias,
             "premium_discount_bias": pd_bias,
             "entry_distance_atr": float(dist_atr),
+            "score_components": {
+                "rr2": best.rr2 * w_rr2,
+                "trend": trend_bonus * w_trend,
+                "confluence": conf_bonus * w_conf,
+                "confluence_count": confluence_count * w_conf_count,
+                "confirmation": confirmation_bonus * w_confirmation,
+            },
         }
 
     return best
