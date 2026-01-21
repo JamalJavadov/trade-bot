@@ -354,6 +354,11 @@ def _build_golden_zone_setup(
     entry = last_close if confirmation and in_zone else (z_low + z_high) / 2.0
     sl_buffer = float(cfg.get("sl_atr_mult", 1.2))
 
+
+def _rejection_wick(df: pd.DataFrame, side: str, zone_low: float, zone_high: float) -> bool:
+    if len(df) < 1:
+        return False
+    c = df.iloc[-1]
     if side == "LONG":
         sl = lo - atr * sl_buffer
         tp1 = hi
