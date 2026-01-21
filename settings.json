@@ -130,7 +130,9 @@
   "scoring": {
     "w_rr2": 10.0,
     "w_trend": 5.0,
-    "w_confluence": 3.0
+    "w_confluence": 3.0,
+    "w_confluence_count": 1.0,
+    "w_confirmation": 2.0
   },
   "scan": {
     "limit_15m": 500
