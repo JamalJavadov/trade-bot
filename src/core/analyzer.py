@@ -164,6 +164,28 @@ def _fib_extension_short(hi: float, lo: float, level: float) -> float:
     return lo + (-level) * rng
 
 
+def _is_strong_trend(
+    df: pd.DataFrame,
+    side: str,
+    atr: float,
+    slope_lookback: int,
+    min_slope_atr: float,
+    min_ema_separation_atr: float,
+) -> bool:
+    if len(df) < 220 or not np.isfinite(atr) or atr <= 0:
+        return False
+    ema50 = _ema(df["close"], 50)
+    ema200 = _ema(df["close"], 200)
+    slope = ema50.iloc[-1] - ema50.iloc[-slope_lookback]
+    if side == "LONG" and slope <= 0:
+        return False
+    if side == "SHORT" and slope >= 0:
+        return False
+    slope_atr = abs(float(slope)) / atr
+    ema_separation_atr = abs(float(ema50.iloc[-1] - ema200.iloc[-1])) / atr
+    return slope_atr >= min_slope_atr and ema_separation_atr >= min_ema_separation_atr
+
+
 def _zone_bounds(a: float, b: float) -> Tuple[float, float]:
     return (min(a, b), max(a, b))
 
@@ -364,17 +386,40 @@ def _build_golden_zone_setup(
         return None
 
     start_idx, end_idx, a, b = leg
+    zone_mode = str(cfg.get("fib_zone_mode", "auto")).lower()
+    zone_label = "Golden zone"
+    strong_trend = _is_strong_trend(
+        df1,
+        side,
+        atr,
+        int(cfg.get("strong_trend_slope_lookback", 8)),
+        float(cfg.get("strong_trend_slope_atr", 0.12)),
+        float(cfg.get("strong_trend_ema_separation_atr", 0.3)),
+    )
+    if zone_mode == "auto":
+        zone_mode = "strong_trend" if strong_trend else "beginner"
+
+    if zone_mode == "strong_trend":
+        zone_label = "Strong trend zone"
+        low_lvl, high_lvl = 0.5, 0.382
+    elif zone_mode == "beginner":
+        zone_label = "Beginner zone"
+        low_lvl, high_lvl = 0.618, 0.382
+    else:
+        zone_label = "Golden zone"
+        low_lvl, high_lvl = 0.618, 0.5
+
     if side == "LONG":
         lo, hi = a, b
         z_low, z_high = _zone_bounds(
-            _fib_retracement(lo, hi, 0.618),
-            _fib_retracement(lo, hi, 0.5),
+            _fib_retracement(lo, hi, low_lvl),
+            _fib_retracement(lo, hi, high_lvl),
         )
     elif side == "SHORT":
         hi, lo = a, b
         z_low, z_high = _zone_bounds(
-            _fib_retracement_short(hi, lo, 0.5),
-            _fib_retracement_short(hi, lo, 0.618),
+            _fib_retracement_short(hi, lo, high_lvl),
+            _fib_retracement_short(hi, lo, low_lvl),
         )
     else:
         return None
@@ -435,11 +480,11 @@ def _build_golden_zone_setup(
     if side == "LONG":
         sl = lo - atr * sl_buffer
         tp1 = hi
-        tp2 = _fib_extension_long(lo, hi, -0.272)
+        tp2 = _fib_extension_long(lo, hi, float(cfg.get("tp2_extension_level", -0.618)))
     else:
         sl = hi + atr * sl_buffer
         tp1 = lo
-        tp2 = _fib_extension_short(hi, lo, -0.272)
+        tp2 = _fib_extension_short(hi, lo, float(cfg.get("tp2_extension_level", -0.618)))
 
     risk = abs(entry - sl)
     if risk <= 0:
@@ -454,13 +499,13 @@ def _build_golden_zone_setup(
     near_zone = dist_to_zone <= atr * max_pre_zone_atr if np.isfinite(atr) else False
     if confirmation and in_zone:
         status = "OK"
-        reason = "Golden zone + confluence + confirmation"
+        reason = f"{zone_label} + confluence + confirmation"
     elif allow_setup and in_zone:
         status = "SETUP"
-        reason = "Golden zone confluence var, confirmation gözlənilir"
+        reason = f"{zone_label} confluence var, confirmation gözlənilir"
     elif allow_setup and allow_pre_zone and near_zone:
         status = "SETUP"
-        reason = "Golden zone yaxınlığında (zone hələ touch etməyib)"
+        reason = f"{zone_label} yaxınlığında (zone hələ touch etməyib)"
     else:
         return None
 
@@ -495,6 +540,9 @@ def _build_golden_zone_setup(
             "confluence_count": int(len(confluences)),
             "weak_confluence": bool(weak_confluence),
             "atr": float(atr),
+            "fib_zone_mode": zone_mode,
+            "fib_zone_label": zone_label,
+            "strong_trend": bool(strong_trend),
         },
     )
 

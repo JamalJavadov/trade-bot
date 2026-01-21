@@ -25,13 +25,16 @@
 - The bot takes the **majority bias** across HTF timeframes. If the alignment ratio is below the configured threshold, it stands aside.
 
 ## 3) Fibonacci Settings
-Use the following retracement levels:
-- 0.382, 0.50, **0.618** (Golden Zone)
-- Optional: 0.786 (deep retrace)
+Retracement zones (choose by regime or let the bot auto-select):
+- **Golden Zone:** 0.50–0.618 (balanced trend pullback)
+- **Strong Trend Zone:** 0.382–0.50 (shallow pullback in aggressive trends)
+- **Beginner Zone:** 0.382–0.618 (broadest reaction band)
+- Optional: 0.786 (deep retrace filter only)
 
 Extensions for targets:
-- **-0.272** (first extension)
-- **-0.618** (aggressive extension)
+- **1.0 measured move** (swing high/low retest)
+- **1.618 extension** (primary TP2 target)
+- Optional: 1.272 extension (aggressive but closer TP2)
 
 Measurement entry zone:
 - **0.71 – 0.75** (precision retrace zone)
@@ -43,12 +46,13 @@ Measurement entry zone:
    - **Downtrend:** swing high wick → swing low wick.
 3. If price ignores the first anchor (no reactions), adjust to the **next significant swing**.
 
-## 5) Golden Zone Strategy (Primary)
-**Idea:** In a trend, price often retraces into the **50–61.8% zone** before continuation.
+## 5) Fibonacci Retracement Strategy (Primary)
+**Idea:** In a trend, price often retraces into a Fibonacci **reaction zone** before continuation.
 
-### 5.1 Entry Zone
-- **Long:** 0.50–0.618 retracement of the impulse.
-- **Short:** 0.50–0.618 retracement of the impulse.
+### 5.1 Entry Zone (Adaptive)
+- **Golden Zone (default classic):** 0.50–0.618.
+- **Strong Trend Zone:** 0.382–0.50.
+- **Beginner Zone:** 0.382–0.618.
 
 ### 5.2 Confluence Filters (must have at least one)
 - **EMA50**: price retraces into golden zone + EMA50 agrees with trend slope.
@@ -69,7 +73,7 @@ Plus: **Golden Respect Rule**
   - Long: below swing low.
   - Short: above swing high.
 - **TP1:** return to swing high/low.
-- **TP2:** extension -0.272 (and optionally -0.618).
+- **TP2:** 1.618 extension (optional 1.272 for conservative exits).
 
 ### 5.5 Setup vs. OK
 - **OK:** in zone + confirmation + confluence.
@@ -115,7 +119,7 @@ The coin with the **highest score** is presented as the **BEST PLAN**.
 ## 9) Operational Checklist (Human or Bot)
 1. Identify 4H trend bias (EMA or premium/discount).
 2. Find impulse leg on 1H and draw Fibonacci.
-3. Check if price is in the Golden Zone (50–61.8).
+3. Check if price is in the selected Fib zone (Golden/Strong/Beginner).
 4. Require at least one confluence.
 5. Confirm with a candlestick reversal or rejection wick.
 6. Compute SL/TPs and RR.
