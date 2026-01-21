@@ -1227,22 +1227,22 @@ class App:
 
     def _set_best_plan(self, best: Optional[dict]) -> None:
         if not best:
-            placeholders = {
-                self.best_symbol_var: "-",
-                self.best_status_var: "-",
-                self.best_side_var: "-",
-                self.best_entry_var: "-",
-                self.best_sl_var: "-",
-                self.best_tp1_var: "-",
-                self.best_tp2_var: "-",
-                self.best_rr_var: "-",
-                self.best_fit_var: "-",
-                self.best_score_var: "-",
-                self.best_qty_var: "-",
-                self.best_leverage_var: "-",
-                self.best_risk_var: "-",
-            }
-            for var, value in placeholders.items():
+            placeholders = [
+                (self.best_symbol_var, "-"),
+                (self.best_status_var, "-"),
+                (self.best_side_var, "-"),
+                (self.best_entry_var, "-"),
+                (self.best_sl_var, "-"),
+                (self.best_tp1_var, "-"),
+                (self.best_tp2_var, "-"),
+                (self.best_rr_var, "-"),
+                (self.best_fit_var, "-"),
+                (self.best_score_var, "-"),
+                (self.best_qty_var, "-"),
+                (self.best_leverage_var, "-"),
+                (self.best_risk_var, "-"),
+            ]
+            for var, value in placeholders:
                 var.set(value)
             self._set_best_details("Skan nəticəsi gözlənilir.")
             self._set_best_form(None)
