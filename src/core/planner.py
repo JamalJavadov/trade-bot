@@ -74,6 +74,8 @@ def load_settings(path: str) -> Dict[str, Any]:
                 "allow_setup_if_no_confirm": True,
                 "best_requires_ok": False,
                 "allow_weak_confluence": True,
+                "allow_pre_zone": True,
+                "max_pre_zone_atr": 1.5,
                 "zone_tolerance_atr": 0.25,
                 "zone_tolerance_pct": 0.002,
                 "sl_atr_mult": 1.2,

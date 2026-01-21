@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import time
-from functools import lru_cache
 from typing import Dict, Any, List, Optional
 
 import pandas as pd
@@ -25,12 +24,10 @@ def server_time() -> dict:
     return client.get_server_time()
 
 
-@lru_cache(maxsize=1)
 def futures_exchange_info() -> Dict[str, Any]:
     return client.futures_exchange_info()
 
 
-@lru_cache(maxsize=4096)
 def _symbol_meta(symbol: str) -> Optional[Dict[str, Any]]:
     info = futures_exchange_info()
     for s in info.get("symbols", []):
@@ -89,7 +86,6 @@ def list_usdtm_perp_symbols_by_volume(limit: int = 200) -> List[str]:
     return [symbol for symbol, _ in ranked[:limit]]
 
 
-@lru_cache(maxsize=4096)
 def get_symbol_filters(symbol: str) -> Dict[str, float]:
     m = _symbol_meta(symbol) or {}
     tick = 0.0

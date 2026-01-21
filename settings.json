@@ -145,6 +145,8 @@
     "zone_tolerance_pct": 0.002,
     "sl_atr_mult": 1.2,
     "best_requires_ok": false,
-    "allow_weak_confluence": true
+    "allow_weak_confluence": true,
+    "allow_pre_zone": true,
+    "max_pre_zone_atr": 1.5
   }
 }

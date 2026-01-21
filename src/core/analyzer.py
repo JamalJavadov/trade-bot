@@ -313,12 +313,14 @@ def _build_golden_zone_setup(
             _fib_retracement(lo, hi, 0.618),
             _fib_retracement(lo, hi, 0.5),
         )
-    else:
+    elif side == "SHORT":
         hi, lo = a, b
         z_low, z_high = _zone_bounds(
             _fib_retracement_short(hi, lo, 0.5),
             _fib_retracement_short(hi, lo, 0.618),
         )
+    else:
+        return None
 
     last_close = float(df1["close"].iloc[-1])
     tol = _zone_tolerance(last_close, atr, float(cfg.get("zone_tolerance_atr", 0.25)), float(cfg.get("zone_tolerance_pct", 0.002)))
@@ -354,11 +356,6 @@ def _build_golden_zone_setup(
     entry = last_close if confirmation and in_zone else (z_low + z_high) / 2.0
     sl_buffer = float(cfg.get("sl_atr_mult", 1.2))
 
-
-def _rejection_wick(df: pd.DataFrame, side: str, zone_low: float, zone_high: float) -> bool:
-    if len(df) < 1:
-        return False
-    c = df.iloc[-1]
     if side == "LONG":
         sl = lo - atr * sl_buffer
         tp1 = hi
@@ -375,12 +372,19 @@ def _rejection_wick(df: pd.DataFrame, side: str, zone_low: float, zone_high: flo
     rr2 = abs(tp2 - entry) / risk
 
     allow_setup = bool(cfg.get("allow_setup_if_no_confirm", True))
+    allow_pre_zone = bool(cfg.get("allow_pre_zone", False))
+    max_pre_zone_atr = float(cfg.get("max_pre_zone_atr", 1.5))
+    dist_to_zone = min(abs(last_close - z_low), abs(last_close - z_high))
+    near_zone = dist_to_zone <= atr * max_pre_zone_atr if np.isfinite(atr) else False
     if confirmation and in_zone:
         status = "OK"
         reason = "Golden zone + confluence + confirmation"
     elif allow_setup and in_zone:
         status = "SETUP"
         reason = "Golden zone confluence var, confirmation gözlənilir"
+    elif allow_setup and allow_pre_zone and near_zone:
+        status = "SETUP"
+        reason = "Golden zone yaxınlığında (zone hələ touch etməyib)"
     else:
         return None
 
@@ -388,6 +392,9 @@ def _rejection_wick(df: pd.DataFrame, side: str, zone_low: float, zone_high: flo
     if weak_confluence:
         score *= 0.6
         reason = f"{reason} (Confluence zəif)"
+    if not in_zone and near_zone:
+        penalty = max(0.4, 1.0 - (dist_to_zone / (atr * max_pre_zone_atr)))
+        score *= penalty
 
     return Analysis(
         status=status,
@@ -404,6 +411,8 @@ def _rejection_wick(df: pd.DataFrame, side: str, zone_low: float, zone_high: flo
             "zone_low": float(z_low),
             "zone_high": float(z_high),
             "in_zone": bool(in_zone),
+            "near_zone": bool(near_zone),
+            "dist_to_zone_atr": float(dist_to_zone / atr) if atr else None,
             "confirmation": bool(confirmation),
             "confluences": confluences,
             "weak_confluence": bool(weak_confluence),
@@ -438,7 +447,7 @@ def _build_measurement_setup(
         )
         sl = impulse_high
         tp = impulse_low
-    else:
+    elif side == "LONG":
         impulse_low = float(df15.loc[sweep_idx:, "low"].min())
         impulse_high = float(df15.loc[bos_idx:, "high"].max())
         if impulse_high <= impulse_low:
@@ -450,6 +459,8 @@ def _build_measurement_setup(
         )
         sl = impulse_low
         tp = impulse_high
+    else:
+        return None
 
     tol = _zone_tolerance(entry, atr, float(cfg.get("zone_tolerance_atr", 0.25)), float(cfg.get("zone_tolerance_pct", 0.002)))
     fvg = _find_fvg(df15, side)
