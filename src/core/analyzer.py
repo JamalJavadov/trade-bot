@@ -779,10 +779,11 @@ def analyze_symbol(
         if golden:
             candidates.append(golden)
 
-    for bias in measurement_biases:
-        measurement = _build_measurement_setup(df_measure, bias, atr1, strategy_cfg)
-        if measurement:
-            candidates.append(measurement)
+    if bool(strategy_cfg.get("allow_measurement_setup", True)):
+        for bias in measurement_biases:
+            measurement = _build_measurement_setup(df_measure, bias, atr1, strategy_cfg)
+            if measurement:
+                candidates.append(measurement)
 
     eligible = [c for c in candidates if c.rr2 >= min_rr2]
     if not eligible:
@@ -848,6 +849,8 @@ def analyze_symbol(
     w_conf_count = float(scoring_cfg.get("w_confluence_count", 1.0))
     w_confirmation = float(scoring_cfg.get("w_confirmation", 2.0))
     w_micro_confirmation = float(scoring_cfg.get("w_micro_confirmation", 1.5))
+    w_alignment = float(scoring_cfg.get("w_alignment", 2.0))
+    w_entry_distance = float(scoring_cfg.get("w_entry_distance", 1.0))
 
     trend_bonus = 1.0 if best.side == ema_bias else 0.5
     conf_bonus = 1.0 if "(" in best.reason else 0.0
@@ -863,6 +866,12 @@ def analyze_symbol(
         elif best.details.get("fvg_overlap"):
             confirmation_bonus = 0.5
 
+    alignment_ratio = max(float(ema_ratio), float(pd_ratio))
+    alignment_score = 0.0
+    if htf_min_alignment < 1.0:
+        alignment_score = max(0.0, min(1.0, (alignment_ratio - htf_min_alignment) / (1.0 - htf_min_alignment)))
+    entry_distance_score = 1.0 - min(1.0, dist_atr / max_entry_atr) if max_entry_atr > 0 else 0.0
+
     best.score = (
         best.rr2 * w_rr2
         + trend_bonus * w_trend
@@ -870,6 +879,8 @@ def analyze_symbol(
         + confluence_count * w_conf_count
         + confirmation_bonus * w_confirmation
         + micro_confirmation_bonus * w_micro_confirmation
+        + alignment_score * w_alignment
+        + entry_distance_score * w_entry_distance
     ) * penalty
     if best.details is not None:
         best.details = {
@@ -903,6 +914,8 @@ def analyze_symbol(
                 "confluence_count": confluence_count * w_conf_count,
                 "confirmation": confirmation_bonus * w_confirmation,
                 "micro_confirmation": micro_confirmation_bonus * w_micro_confirmation,
+                "alignment": alignment_score * w_alignment,
+                "entry_distance": entry_distance_score * w_entry_distance,
             },
         }
 

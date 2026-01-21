@@ -136,7 +136,9 @@
     "w_confluence": 3.0,
     "w_confluence_count": 1.0,
     "w_confirmation": 2.0,
-    "w_micro_confirmation": 1.5
+    "w_micro_confirmation": 1.5,
+    "w_alignment": 2.0,
+    "w_entry_distance": 1.0
   },
   "scan": {
     "limit_15m": 500
@@ -154,9 +156,9 @@
     "confirm_timeframe": "15m",
     "measurement_timeframe": "15m",
     "micro_confirm_timeframe": "5m",
-    "min_confluence": 1,
+    "min_confluence": 2,
     "require_confluence": true,
-    "allow_setup_if_no_confirm": true,
+    "allow_setup_if_no_confirm": false,
     "zone_tolerance_atr": 0.25,
     "zone_tolerance_pct": 0.002,
     "sl_atr_mult": 1.2,
@@ -165,9 +167,10 @@
     "strong_trend_slope_atr": 0.12,
     "strong_trend_ema_separation_atr": 0.3,
     "tp2_extension_level": -0.618,
-    "best_requires_ok": false,
-    "allow_weak_confluence": true,
-    "allow_pre_zone": true,
-    "max_pre_zone_atr": 1.5
+    "best_requires_ok": true,
+    "allow_weak_confluence": false,
+    "allow_pre_zone": false,
+    "max_pre_zone_atr": 1.5,
+    "allow_measurement_setup": false
   }
 }
