@@ -135,7 +135,8 @@
     "w_trend": 5.0,
     "w_confluence": 3.0,
     "w_confluence_count": 1.0,
-    "w_confirmation": 2.0
+    "w_confirmation": 2.0,
+    "w_micro_confirmation": 1.5
   },
   "scan": {
     "limit_15m": 500
@@ -145,12 +146,14 @@
     "htf_range_lookback": 200,
     "htf_bias_timeframes": [
       "1d",
-      "4h"
+      "4h",
+      "1h"
     ],
     "htf_min_alignment": 0.6,
     "impulse_timeframe": "1h",
     "confirm_timeframe": "15m",
     "measurement_timeframe": "15m",
+    "micro_confirm_timeframe": "5m",
     "min_confluence": 1,
     "require_confluence": true,
     "allow_setup_if_no_confirm": true,

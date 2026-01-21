@@ -13,6 +13,7 @@ from ..core.planner import (
     save_settings,
     run_scan_and_build_best_plan,
     format_report,
+    save_scan_results,
 )
 
 
@@ -252,10 +253,11 @@ class WorkflowDiagram(tk.Canvas):
             **kwargs
         )
         self.steps = [
-            "4H Fetch",
-            "1H Fetch",
-            "15M Fetch",
-            "Analyze",
+            "1D Bias",
+            "4H Bias",
+            "1H Impulse",
+            "15M Confirm",
+            "5M Trigger",
             "Score",
             "Report",
         ]
@@ -265,9 +267,11 @@ class WorkflowDiagram(tk.Canvas):
     def set_stage(self, stage_text: str) -> None:
         stage = stage_text.lower()
         mapping = {
-            "fetch 4h": 0,
-            "fetch 1h": 1,
-            "fetch 15m": 2,
+            "fetch 1d": 0,
+            "fetch 4h": 1,
+            "fetch 1h": 2,
+            "fetch 15m": 3,
+            "fetch 5m": 4,
         }
         idx = None
         for key, val in mapping.items():
@@ -276,11 +280,11 @@ class WorkflowDiagram(tk.Canvas):
                 break
         if idx is None:
             if "analiz" in stage or "analysis" in stage:
-                idx = 3
+                idx = 2
             elif "score" in stage:
-                idx = 4
-            elif "report" in stage or "tamamlandı" in stage:
                 idx = 5
+            elif "report" in stage or "tamamlandı" in stage:
+                idx = 6
         if idx is not None:
             self.active_index = idx
             self._draw()
@@ -799,7 +803,7 @@ class App:
         
         self.txt.delete("1.0", "end")
         self.txt.insert("end", "🔄 Skan başlayır...\n\n")
-        self._update_summary({"ok": 0, "setup": 0, "no": 0, "total": 0, "best": None})
+        self._update_summary({"ok": 0, "setup": 0, "no": 0, "total": 0, "best": None, "best_fit": 0.0})
         self.workflow.reset()
         
         self._set_busy(True)
@@ -846,13 +850,15 @@ class App:
                     on_progress=on_progress,
                     on_stage=on_stage,
                 )
-                report = format_report(results, best, settings)
+                snapshot_path = save_scan_results(results, best, settings)
+                report = format_report(results, best, settings, snapshot_path=snapshot_path)
                 summary = {
                     "ok": len([r for r in results if r.status == "OK"]),
                     "setup": len([r for r in results if r.status == "SETUP"]),
                     "no": len([r for r in results if r.status == "NO_TRADE"]),
                     "total": len(results),
                     "best": best.symbol if best else None,
+                    "best_fit": float(best.probability) if best else 0.0,
                 }
                 self._q.put(("done", report, summary))
             except Exception as e:
@@ -910,8 +916,9 @@ class App:
         no = int(summary.get("no", 0))
         total = int(summary.get("total", ok + setup + no))
         best = summary.get("best") or "-"
+        best_fit = float(summary.get("best_fit", 0.0))
         self.ok_var.set(f"OK: {ok}")
         self.setup_var.set(f"SETUP: {setup}")
         self.no_var.set(f"NO_TRADE: {no}")
-        self.best_var.set(f"Best: {best} / {total}")
+        self.best_var.set(f"Best: {best} ({best_fit:.1f}%) / {total}")
         self.summary_chart.set_counts(ok, setup, no)

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Callable
 
@@ -71,6 +72,12 @@ def load_settings(path: str) -> Dict[str, Any]:
             "strategy": {
                 "impulse_lookback": 240,
                 "htf_range_lookback": 200,
+                "htf_bias_timeframes": ["1d", "4h", "1h"],
+                "htf_min_alignment": 0.6,
+                "impulse_timeframe": "1h",
+                "confirm_timeframe": "15m",
+                "measurement_timeframe": "15m",
+                "micro_confirm_timeframe": "5m",
                 "min_confluence": 1,
                 "require_confluence": True,
                 "allow_setup_if_no_confirm": True,
@@ -81,6 +88,14 @@ def load_settings(path: str) -> Dict[str, Any]:
                 "zone_tolerance_atr": 0.25,
                 "zone_tolerance_pct": 0.002,
                 "sl_atr_mult": 1.2,
+            },
+            "scoring": {
+                "w_rr2": 10.0,
+                "w_trend": 5.0,
+                "w_confluence": 3.0,
+                "w_confluence_count": 1.0,
+                "w_confirmation": 2.0,
+                "w_micro_confirmation": 1.5,
             },
         }
     return json.loads(p.read_text(encoding="utf-8"))
@@ -220,25 +235,73 @@ def run_scan_and_build_best_plan(
         except Exception as e:
             results.append(ScanResult(sym, "NO_TRADE", "-", 0.0, 0.0, 0.0, f"ERROR: {e}"))
 
-    scored = [r.score for r in results if r.status in ("OK", "SETUP")]
+    scored = [r.score for r in results]
     max_score = max(scored) if scored else 0.0
     for r in results:
-        if r.status in ("OK", "SETUP"):
-            r.probability = _fit_probability(r.score, max_score)
-        else:
-            r.probability = 0.0
+        r.probability = _fit_probability(r.score, max_score)
     if best_ok:
         best_ok.probability = _fit_probability(best_ok.score, max_score)
     if best_setup:
         best_setup.probability = _fit_probability(best_setup.score, max_score)
 
     prefer_ok = bool(settings.get("strategy", {}).get("best_requires_ok", False))
-    if prefer_ok:
+    if prefer_ok and best_ok:
         return results, best_ok
     return results, (best_ok or best_setup)
 
 
-def format_report(results: List[ScanResult], best: Optional[Plan], settings: Dict[str, Any]) -> str:
+def save_scan_results(
+    results: List[ScanResult],
+    best: Optional[Plan],
+    settings: Dict[str, Any],
+    output_dir: str = "outputs/scans",
+) -> Path:
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    payload = {
+        "timestamp_utc": timestamp,
+        "settings": {
+            "symbols": settings.get("symbols", {}),
+            "risk": settings.get("risk", {}),
+            "scoring": settings.get("scoring", {}),
+            "strategy": settings.get("strategy", {}),
+            "timeframes": settings.get("timeframes", {}),
+            "scan": settings.get("scan", {}),
+        },
+        "best": asdict(best) if best else None,
+        "results": [asdict(r) for r in results],
+    }
+
+    json_path = out_dir / f"scan_{timestamp}.json"
+    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    df = pd.DataFrame([{
+        "symbol": r.symbol,
+        "status": r.status,
+        "side": r.side,
+        "rr2": r.rr2,
+        "score": r.score,
+        "probability": r.probability,
+        "entry": r.entry,
+        "sl": r.sl,
+        "tp1": r.tp1,
+        "tp2": r.tp2,
+        "reason": r.reason,
+    } for r in results])
+    csv_path = out_dir / f"scan_{timestamp}.csv"
+    df.to_csv(csv_path, index=False)
+
+    return json_path
+
+
+def format_report(
+    results: List[ScanResult],
+    best: Optional[Plan],
+    settings: Dict[str, Any],
+    snapshot_path: Optional[Path] = None,
+) -> str:
     ok = [r for r in results if r.status == "OK"]
     setups = [r for r in results if r.status == "SETUP"]
     no = [r for r in results if r.status == "NO_TRADE"]
@@ -264,6 +327,11 @@ def format_report(results: List[ScanResult], best: Optional[Plan], settings: Dic
     def _top(lst: List[ScanResult], n: int = 10) -> List[ScanResult]:
         return sorted(lst, key=lambda r: r.score, reverse=True)[:n]
 
+    lines.append("=== TOP SUITABILITY (All Coins) ===")
+    for r in _top(results, 12):
+        lines.append(f"{r.symbol}: {r.status} | {r.side} | fit={r.probability:.1f}% | score={r.score:.2f}")
+    lines.append("")
+
     if ok:
         lines.append("=== TOP OK (Ready) ===")
         for r in _top(ok, 10):
@@ -279,6 +347,8 @@ def format_report(results: List[ScanResult], best: Optional[Plan], settings: Dic
     lines.append("=== BEST PLAN ===")
     if not best:
         lines.append("NO TRADE\n")
+        if snapshot_path:
+            lines.append(f"Snapshot: {snapshot_path}")
         return "\n".join(lines)
 
     lines.append(f"{best.symbol} | {best.side} | {best.status}")
@@ -312,5 +382,8 @@ def format_report(results: List[ScanResult], best: Optional[Plan], settings: Dic
 
     if best.status == "SETUP":
         lines.append("\n[WATCH] Bu SETUP-dur. Qaydaya görə kor-koranə girmə. Price zone-a gələndə 5m sweep+close təsdiqi gözlə.")
+
+    if snapshot_path:
+        lines.append(f"\nSnapshot: {snapshot_path}")
 
     return "\n".join(lines)
