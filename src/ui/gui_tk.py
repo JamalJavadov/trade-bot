@@ -24,18 +24,24 @@ class ModernStyle:
     BG_DARK = "#121826"
     BG_MEDIUM = "#1f2736"
     BG_LIGHT = "#2d3850"
+    BG_ELEVATED = "#253049"
+    BG_PANEL = "#1a2234"
     ACCENT_PRIMARY = "#00d4ff"
     ACCENT_SUCCESS = "#00ff88"
     ACCENT_WARNING = "#ffaa00"
     ACCENT_ERROR = "#ff4444"
+    ACCENT_INFO = "#6aa7ff"
+    ACCENT_PURPLE = "#b28dff"
     TEXT_PRIMARY = "#f5f7ff"
     TEXT_SECONDARY = "#c5cbe6"
+    TEXT_MUTED = "#8892b0"
     BORDER = "#3a475f"
     
     # Font Konfiqurasiyası
     FONT_MAIN = ("Segoe UI", 11)
     FONT_HEADER = ("Segoe UI Semibold", 12)
     FONT_TITLE = ("Segoe UI Bold", 14)
+    FONT_SUBTITLE = ("Segoe UI Semibold", 11)
     FONT_MONO = ("Consolas", 10)
 
 
@@ -206,7 +212,9 @@ class SummaryChart(tk.Canvas):
             return
 
         total = max(sum(self.counts.values()), 1)
-        chart_height = height - 30
+        chart_top = 28
+        chart_bottom = height - 18
+        chart_height = max(1, chart_bottom - chart_top)
         bar_width = max(30, int(width / 6))
         gap = int((width - (bar_width * 3)) / 4)
         colors = {
@@ -215,18 +223,27 @@ class SummaryChart(tk.Canvas):
             "no": ModernStyle.ACCENT_ERROR,
         }
 
+        self.create_text(
+            12,
+            12,
+            text="Signal Distribution",
+            fill=ModernStyle.TEXT_MUTED,
+            anchor="w",
+            font=ModernStyle.FONT_SUBTITLE,
+        )
+
         for idx, key in enumerate(["ok", "setup", "no"]):
             x0 = gap + idx * (bar_width + gap)
-            bar_height = int((self.counts[key] / total) * (chart_height - 10))
-            y0 = chart_height - bar_height
+            bar_height = int((self.counts[key] / total) * (chart_height - 6))
+            y0 = chart_bottom - bar_height
             self.create_rectangle(
-                x0, y0, x0 + bar_width, chart_height,
+                x0, y0, x0 + bar_width, chart_bottom,
                 fill=colors[key],
                 outline=""
             )
             self.create_text(
                 x0 + bar_width / 2,
-                chart_height + 12,
+                chart_bottom + 12,
                 text=key.upper(),
                 fill=ModernStyle.TEXT_SECONDARY,
                 font=ModernStyle.FONT_MAIN
@@ -253,8 +270,8 @@ class WorkflowDiagram(tk.Canvas):
             **kwargs
         )
         self.steps = [
-            {"title": "1D", "subtitle": "Bias"},
-            {"title": "4H", "subtitle": "Bias"},
+            {"title": "1D", "subtitle": "Trend Bias"},
+            {"title": "4H", "subtitle": "Market Bias"},
             {"title": "1H", "subtitle": "Impulse"},
             {"title": "15M", "subtitle": "Confirm"},
             {"title": "5M", "subtitle": "Trigger"},
@@ -339,7 +356,7 @@ class WorkflowDiagram(tk.Canvas):
         row_gap = 22
         card_height = 64
         card_radius = 14
-        top_y = padding_y + 20
+        top_y = padding_y + 46
 
         card_min_width = 88
         card_max_width = 130
@@ -358,6 +375,32 @@ class WorkflowDiagram(tk.Canvas):
             anchor="w",
             font=ModernStyle.FONT_HEADER
         )
+
+        legend_items = [
+            ("Pending", ModernStyle.TEXT_MUTED),
+            ("Active", ModernStyle.ACCENT_PRIMARY),
+            ("Complete", ModernStyle.ACCENT_SUCCESS),
+        ]
+        legend_x = padding_x + 120
+        legend_y = padding_y + 2
+        for label, color in legend_items:
+            self.create_oval(
+                legend_x,
+                legend_y,
+                legend_x + 10,
+                legend_y + 10,
+                fill=color,
+                outline="",
+            )
+            self.create_text(
+                legend_x + 16,
+                legend_y + 5,
+                text=label,
+                fill=ModernStyle.TEXT_MUTED,
+                anchor="w",
+                font=ModernStyle.FONT_MAIN,
+            )
+            legend_x += 80
 
         for idx, step in enumerate(self.steps):
             row = idx // cols
@@ -490,6 +533,7 @@ class ModernButton(tk.Canvas):
         self.text = text
         self.command = command
         self.hovered = False
+        self.disabled = False
         
         super().__init__(
             parent,
@@ -514,7 +558,10 @@ class ModernButton(tk.Canvas):
         height = self.winfo_height() if self.winfo_height() > 1 else 36
         
         # Background
-        bg_color = ModernStyle.ACCENT_PRIMARY if self.hovered else ModernStyle.BG_LIGHT
+        if self.disabled:
+            bg_color = ModernStyle.BG_PANEL
+        else:
+            bg_color = ModernStyle.ACCENT_PRIMARY if self.hovered else ModernStyle.BG_LIGHT
         self.create_rectangle(
             2, 2, width-2, height-2,
             fill=bg_color,
@@ -523,7 +570,10 @@ class ModernButton(tk.Canvas):
         )
         
         # Text
-        text_color = ModernStyle.BG_DARK if self.hovered else ModernStyle.TEXT_PRIMARY
+        if self.disabled:
+            text_color = ModernStyle.TEXT_MUTED
+        else:
+            text_color = ModernStyle.BG_DARK if self.hovered else ModernStyle.TEXT_PRIMARY
         self.create_text(
             width // 2, height // 2,
             text=self.text,
@@ -532,16 +582,23 @@ class ModernButton(tk.Canvas):
         )
     
     def _on_enter(self, event):
-        self.hovered = True
-        self._draw()
+        if not self.disabled:
+            self.hovered = True
+            self._draw()
     
     def _on_leave(self, event):
-        self.hovered = False
-        self._draw()
+        if not self.disabled:
+            self.hovered = False
+            self._draw()
     
     def _on_click(self, event):
-        if self.command:
+        if self.command and not self.disabled:
             self.command()
+
+    def set_disabled(self, disabled: bool) -> None:
+        self.disabled = disabled
+        self.hovered = False
+        self._draw()
 
 
 class App:
@@ -551,8 +608,8 @@ class App:
         self.root.configure(bg=ModernStyle.BG_DARK)
         
         # Window konfiqurasiyası
-        self.root.geometry("900x700")
-        self.root.minsize(800, 600)
+        self.root.geometry("980x760")
+        self.root.minsize(900, 680)
         
         # Queue və thread
         self._q: queue.Queue = queue.Queue()
@@ -615,6 +672,13 @@ class App:
             foreground=ModernStyle.TEXT_PRIMARY,
             font=ModernStyle.FONT_TITLE
         )
+
+        style.configure(
+            "SubHeader.TLabel",
+            background=ModernStyle.BG_DARK,
+            foreground=ModernStyle.TEXT_SECONDARY,
+            font=ModernStyle.FONT_SUBTITLE
+        )
         
         style.configure(
             "Normal.TLabel",
@@ -627,6 +691,13 @@ class App:
             "Secondary.TLabel",
             background=ModernStyle.BG_MEDIUM,
             foreground=ModernStyle.TEXT_SECONDARY,
+            font=ModernStyle.FONT_MAIN
+        )
+
+        style.configure(
+            "Muted.TLabel",
+            background=ModernStyle.BG_MEDIUM,
+            foreground=ModernStyle.TEXT_MUTED,
             font=ModernStyle.FONT_MAIN
         )
         
@@ -657,7 +728,7 @@ class App:
     
     def _create_header(self):
         """Header bölməsi"""
-        header = ttk.Frame(self.root, style="Dark.TFrame", padding=15)
+        header = ttk.Frame(self.root, style="Dark.TFrame", padding=18)
         header.pack(fill="x")
         
         # Title
@@ -669,6 +740,12 @@ class App:
             text="⚡ TRADE BOT",
             style="Header.TLabel"
         ).pack(side="left")
+
+        ttk.Label(
+            title_frame,
+            text="Professional multi-timeframe scanner & plan builder",
+            style="SubHeader.TLabel"
+        ).pack(side="left", padx=(14, 0))
         
         # Status indicator
         self.status_indicator = StatusIndicator(header)
@@ -678,7 +755,7 @@ class App:
         status_label = ttk.Label(
             header,
             textvariable=self.status_var,
-            style="Header.TLabel"
+            style="SubHeader.TLabel"
         )
         status_label.pack(side="right", padx=10)
         
@@ -700,6 +777,12 @@ class App:
             padding=20
         )
         params_card.pack(fill="x", padx=15, pady=(10, 5))
+
+        ttk.Label(
+            params_card,
+            text="Risk idarəetməsi və ölçüləmə üçün əsas parametrlər.",
+            style="Muted.TLabel"
+        ).pack(anchor="w", pady=(0, 10))
         
         # Variables
         self.budget_var = tk.DoubleVar(
@@ -751,6 +834,10 @@ class App:
             width=100
         )
         self.btn_save.pack()
+
+        params_grid.columnconfigure(0, weight=1)
+        params_grid.columnconfigure(2, weight=1)
+        params_grid.columnconfigure(4, weight=1)
     
     def _create_param_field(self, parent, col, label_text, variable, width=10):
         """Parameter field yaradır"""
@@ -778,6 +865,12 @@ class App:
             padding=20
         )
         scan_card.pack(fill="x", padx=15, pady=5)
+
+        ttk.Label(
+            scan_card,
+            text="Dəqiq mərhələ izləmə, progress animasiyası və real-time status.",
+            style="Muted.TLabel"
+        ).pack(anchor="w", pady=(0, 10))
         
         # Info row
         info_frame = ttk.Frame(scan_card, style="Card.TFrame")
@@ -809,8 +902,18 @@ class App:
         stage_label.pack(fill="x", pady=(0, 8))
         
         # Progress bar
-        self.progress = AnimatedProgressBar(scan_card)
-        self.progress.pack(fill="x", pady=(0, 15))
+        progress_frame = ttk.Frame(scan_card, style="Card.TFrame")
+        progress_frame.pack(fill="x", pady=(0, 12))
+
+        self.progress = AnimatedProgressBar(progress_frame)
+        self.progress.pack(side="left", fill="x", expand=True)
+
+        self.progress_pct_var = tk.StringVar(value="0%")
+        ttk.Label(
+            progress_frame,
+            textvariable=self.progress_pct_var,
+            style="Normal.TLabel"
+        ).pack(side="right", padx=(12, 0))
         
         # Run button
         btn_container = ttk.Frame(scan_card, style="Card.TFrame")
@@ -845,10 +948,15 @@ class App:
         self.no_var = tk.StringVar(value="NO_TRADE: 0")
         self.best_var = tk.StringVar(value="Best: -")
 
-        for idx, var in enumerate([self.ok_var, self.setup_var, self.no_var, self.best_var]):
-            card = ttk.Frame(stats_frame, style="Card.TFrame", padding=8)
-            card.grid(row=0, column=idx, padx=5, sticky="ew")
-            ttk.Label(card, textvariable=var, style="Normal.TLabel").pack()
+        badges = [
+            (self.ok_var, ModernStyle.ACCENT_SUCCESS),
+            (self.setup_var, ModernStyle.ACCENT_WARNING),
+            (self.no_var, ModernStyle.ACCENT_ERROR),
+            (self.best_var, ModernStyle.ACCENT_INFO),
+        ]
+        for idx, (var, color) in enumerate(badges):
+            badge = self._create_stat_badge(stats_frame, var, color)
+            badge.grid(row=0, column=idx, padx=6, sticky="ew")
 
         stats_frame.columnconfigure(0, weight=1)
         stats_frame.columnconfigure(1, weight=1)
@@ -988,6 +1096,14 @@ class App:
         for col in range(6):
             form_grid.columnconfigure(col, weight=1)
 
+        ttk.Separator(output_card, orient="horizontal").pack(fill="x", pady=(12, 8))
+
+        ttk.Label(
+            output_card,
+            text="📑 Ətraflı Hesabat",
+            style="Normal.TLabel"
+        ).pack(anchor="w", padx=6, pady=(0, 6))
+
         # Text widget with scrollbar
         txt_frame = ttk.Frame(output_card, style="Card.TFrame")
         txt_frame.pack(fill="both", expand=True)
@@ -1007,10 +1123,33 @@ class App:
             relief="flat",
             padx=10,
             pady=10,
+            spacing1=4,
+            spacing2=2,
+            spacing3=4,
             yscrollcommand=scrollbar.set
         )
         self.txt.pack(side="left", fill="both", expand=True)
         scrollbar.config(command=self.txt.yview)
+
+    def _create_stat_badge(self, parent, var: tk.StringVar, accent: str) -> tk.Frame:
+        frame = tk.Frame(
+            parent,
+            bg=ModernStyle.BG_ELEVATED,
+            highlightthickness=1,
+            highlightbackground=accent,
+            highlightcolor=accent,
+        )
+        label = tk.Label(
+            frame,
+            textvariable=var,
+            bg=ModernStyle.BG_ELEVATED,
+            fg=ModernStyle.TEXT_PRIMARY,
+            font=ModernStyle.FONT_HEADER,
+            padx=12,
+            pady=8,
+        )
+        label.pack(fill="both", expand=True)
+        return frame
     
     def _symbols_count_text(self) -> str:
         s = self.settings.get("symbols", {})
@@ -1050,13 +1189,12 @@ class App:
         self.root.after(2000, lambda: self.status_indicator.set_state("idle"))
     
     def _set_busy(self, busy: bool):
-        state = "disabled" if busy else "normal"
-        # Note: ModernButton doesn't have configure, we'll handle it differently
-        # For now, we can just change the visual state
         if busy:
             self.status_indicator.set_state("active")
         else:
             self.status_indicator.set_state("idle")
+        self.btn_run.set_disabled(busy)
+        self.btn_save.set_disabled(busy)
     
     def _start_spinner(self):
         self._spinning = True
@@ -1087,6 +1225,7 @@ class App:
         self._start_spinner()
         self.stage_var.set("⚙️  İnisializasiya...")
         self.progress.configure(value=0, maximum=100)
+        self.progress_pct_var.set("0%")
         
         budget = float(self.budget_var.get())
         risk_pct = float(self.risk_pct_var.get())
@@ -1158,6 +1297,8 @@ class App:
                     self.workflow.set_stage("analiz")
                     if total > 0:
                         self.progress.configure(maximum=total, value=i)
+                        pct = int((i / total) * 100)
+                        self.progress_pct_var.set(f"{pct}%")
                 
                 elif kind == "stage":
                     _, text = msg
@@ -1176,12 +1317,14 @@ class App:
                     self.workflow.set_stage("report")
                     self._update_summary(summary)
                     self._set_best_plan(best_payload)
+                    self.progress_pct_var.set("100%")
                 
                 elif kind == "error":
                     _, err = msg
                     self._stop_spinner()
                     self._set_busy(False)
                     self.status_indicator.set_state("error")
+                    self.progress_pct_var.set("0%")
                     messagebox.showerror("Xəta", err)
         
         except queue.Empty:
