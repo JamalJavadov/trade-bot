@@ -1164,7 +1164,34 @@ class App:
         )
         output_card.pack(fill="both", expand=True, padx=15, pady=(5, 15))
 
-        summary_frame = ttk.Frame(output_card, style="Card.TFrame")
+        content_container = ttk.Frame(output_card, style="Card.TFrame")
+        content_container.pack(fill="both", expand=True)
+
+        canvas = tk.Canvas(
+            content_container,
+            bg=ModernStyle.BG_DARK,
+            highlightthickness=0,
+            bd=0,
+        )
+        scrollbar = ttk.Scrollbar(content_container, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        content_frame = ttk.Frame(canvas, style="Card.TFrame")
+        content_window = canvas.create_window((0, 0), window=content_frame, anchor="nw")
+
+        def on_frame_configure(event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def on_canvas_configure(event):
+            canvas.itemconfigure(content_window, width=event.width)
+
+        content_frame.bind("<Configure>", on_frame_configure)
+        canvas.bind("<Configure>", on_canvas_configure)
+
+        summary_frame = ttk.Frame(content_frame, style="Card.TFrame")
         summary_frame.pack(fill="x", pady=(0, 10))
 
         stats_frame = ttk.Frame(summary_frame, style="Card.TFrame")
@@ -1200,7 +1227,7 @@ class App:
         self.workflow.pack(fill="x")
 
         best_frame = ttk.LabelFrame(
-            output_card,
+            content_frame,
             text="⭐ Ən Yüksək Ehtimallı Əməliyyat",
             style="Card.TLabelframe",
             padding=12,
@@ -1492,13 +1519,13 @@ class App:
         ttk.Separator(output_card, orient="horizontal").pack(fill="x", pady=(12, 8))
 
         ttk.Label(
-            output_card,
+            content_frame,
             text="📑 Ətraflı Hesabat",
             style="Normal.TLabel"
         ).pack(anchor="w", padx=6, pady=(0, 6))
 
         # Text widget with scrollbar
-        txt_frame = ttk.Frame(output_card, style="Card.TFrame")
+        txt_frame = ttk.Frame(content_frame, style="Card.TFrame")
         txt_frame.pack(fill="both", expand=True)
         
         scrollbar = ttk.Scrollbar(txt_frame)
