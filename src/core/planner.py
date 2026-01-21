@@ -23,6 +23,7 @@ class ScanResult:
     sl: float = 0.0
     tp1: float = 0.0
     tp2: float = 0.0
+    details: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -42,6 +43,7 @@ class Plan:
     leverage: int
     risk_target: float
     risk_actual: float
+    details: Optional[Dict[str, Any]] = None
 
 
 def load_settings(path: str) -> Dict[str, Any]:
@@ -69,8 +71,9 @@ def load_settings(path: str) -> Dict[str, Any]:
                 "htf_range_lookback": 200,
                 "min_confluence": 1,
                 "require_confluence": True,
-                "allow_setup_if_no_confirm": False,
-                "best_requires_ok": True,
+                "allow_setup_if_no_confirm": True,
+                "best_requires_ok": False,
+                "allow_weak_confluence": True,
                 "zone_tolerance_atr": 0.25,
                 "zone_tolerance_pct": 0.002,
                 "sl_atr_mult": 1.2,
@@ -163,6 +166,7 @@ def run_scan_and_build_best_plan(
                 sl=float(a.sl),
                 tp1=float(a.tp1),
                 tp2=float(a.tp2),
+                details=a.details,
             )
             results.append(r)
 
@@ -190,6 +194,7 @@ def run_scan_and_build_best_plan(
                     leverage=int(leverage),
                     risk_target=risk_target,
                     risk_actual=risk_actual,
+                    details=a.details,
                 )
 
                 if a.status == "OK":
@@ -255,6 +260,12 @@ def format_report(results: List[ScanResult], best: Optional[Plan], settings: Dic
     lines.append(f"Entry={best.entry:.6f} SL={best.sl:.6f} TP1={best.tp1:.6f} TP2={best.tp2:.6f}")
     lines.append(f"RR1={best.rr1:.2f} RR2={best.rr2:.2f} | score={best.score:.2f}")
     lines.append(f"Səbəb: {best.reason}\n")
+
+    if best.details:
+        lines.append("=== ANALİZ DETALLARI ===")
+        for key, value in best.details.items():
+            lines.append(f"- {key}: {value}")
+        lines.append("")
 
     # Manual form guidance
     exp_days = int(settings.get("plan", {}).get("expiry_days", 7))

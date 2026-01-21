@@ -19,6 +19,7 @@ class Analysis:
     rr2: float = 0.0
     score: float = 0.0
     reason: str = ""         # niyə OK/SETUP/NO_TRADE
+    details: Optional[Dict[str, Any]] = None
 
 
 def _ema(s: pd.Series, span: int) -> pd.Series:
@@ -334,8 +335,12 @@ def _build_golden_zone_setup(
 
     min_conf = int(cfg.get("min_confluence", 1))
     require_confluence = bool(cfg.get("require_confluence", True))
+    allow_weak_confluence = bool(cfg.get("allow_weak_confluence", False))
+    weak_confluence = False
     if require_confluence and len(confluences) < min_conf:
-        return None
+        if not allow_weak_confluence:
+            return None
+        weak_confluence = True
 
     confirmation = False
     if in_zone:
@@ -349,6 +354,11 @@ def _build_golden_zone_setup(
     entry = last_close if confirmation and in_zone else (z_low + z_high) / 2.0
     sl_buffer = float(cfg.get("sl_atr_mult", 1.2))
 
+
+def _rejection_wick(df: pd.DataFrame, side: str, zone_low: float, zone_high: float) -> bool:
+    if len(df) < 1:
+        return False
+    c = df.iloc[-1]
     if side == "LONG":
         sl = lo - atr * sl_buffer
         tp1 = hi
@@ -374,6 +384,11 @@ def _build_golden_zone_setup(
     else:
         return None
 
+    score = rr2
+    if weak_confluence:
+        score *= 0.6
+        reason = f"{reason} (Confluence zəif)"
+
     return Analysis(
         status=status,
         side=side,
@@ -383,8 +398,17 @@ def _build_golden_zone_setup(
         tp2=float(tp2),
         rr1=float(rr1),
         rr2=float(rr2),
-        score=float(rr2),
+        score=float(score),
         reason=f"{reason} ({', '.join(confluences)})",
+        details={
+            "zone_low": float(z_low),
+            "zone_high": float(z_high),
+            "in_zone": bool(in_zone),
+            "confirmation": bool(confirmation),
+            "confluences": confluences,
+            "weak_confluence": bool(weak_confluence),
+            "atr": float(atr),
+        },
     )
 
 
@@ -456,6 +480,14 @@ def _build_measurement_setup(
         rr2=float(rr),
         score=float(rr + (0.5 if fvg_overlap else 0.0)),
         reason=reason,
+        details={
+            "entry_zone_low": float(zone_low),
+            "entry_zone_high": float(zone_high),
+            "fvg_overlap": bool(fvg_overlap),
+            "atr": float(atr),
+            "sweep_idx": int(sweep_idx),
+            "bos_idx": int(bos_idx),
+        },
     )
 
 
@@ -531,5 +563,12 @@ def analyze_symbol(
     trend_bonus = 1.0 if best.side == ema_bias else 0.5
     conf_bonus = 1.0 if "(" in best.reason else 0.0
     best.score = best.rr2 * w_rr2 + trend_bonus * w_trend + conf_bonus * w_conf
+    if best.details is not None:
+        best.details = {
+            **best.details,
+            "ema_bias": ema_bias,
+            "premium_discount_bias": pd_bias,
+            "entry_distance_atr": float(dist_atr),
+        }
 
     return best
