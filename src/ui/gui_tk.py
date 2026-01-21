@@ -712,6 +712,130 @@ class App:
         self.workflow = WorkflowDiagram(visuals_frame)
         self.workflow.pack(fill="x")
 
+        best_frame = ttk.LabelFrame(
+            output_card,
+            text="⭐ Ən Yüksək Ehtimallı Əməliyyat",
+            style="Card.TLabelframe",
+            padding=12,
+        )
+        best_frame.pack(fill="x", pady=(0, 10))
+
+        self.best_symbol_var = tk.StringVar(value="-")
+        self.best_status_var = tk.StringVar(value="-")
+        self.best_side_var = tk.StringVar(value="-")
+        self.best_entry_var = tk.StringVar(value="-")
+        self.best_sl_var = tk.StringVar(value="-")
+        self.best_tp1_var = tk.StringVar(value="-")
+        self.best_tp2_var = tk.StringVar(value="-")
+        self.best_rr_var = tk.StringVar(value="-")
+        self.best_fit_var = tk.StringVar(value="-")
+        self.best_score_var = tk.StringVar(value="-")
+        self.best_qty_var = tk.StringVar(value="-")
+        self.best_leverage_var = tk.StringVar(value="-")
+        self.best_risk_var = tk.StringVar(value="-")
+        self.best_form_market_var = tk.StringVar(value="-")
+        self.best_form_margin_var = tk.StringVar(value="Isolated")
+        self.best_form_leverage_var = tk.StringVar(value="-")
+        self.best_form_tab_var = tk.StringVar(value="Limit")
+        self.best_form_price_var = tk.StringVar(value="-")
+        self.best_form_qty_var = tk.StringVar(value="-")
+        self.best_form_tp_var = tk.StringVar(value="-")
+        self.best_form_sl_var = tk.StringVar(value="-")
+        self.best_form_tif_var = tk.StringVar(value="GTC")
+        self.best_form_action_var = tk.StringVar(value="-")
+        self.best_form_reduce_only_var = tk.StringVar(value="OFF (entry açırsan)")
+
+        best_grid = ttk.Frame(best_frame, style="Card.TFrame")
+        best_grid.pack(fill="x")
+
+        rows = [
+            ("Simvol", self.best_symbol_var),
+            ("Status", self.best_status_var),
+            ("Side", self.best_side_var),
+            ("Entry", self.best_entry_var),
+            ("Stop Loss", self.best_sl_var),
+            ("TP1", self.best_tp1_var),
+            ("TP2", self.best_tp2_var),
+            ("RR1/RR2", self.best_rr_var),
+            ("Fit %", self.best_fit_var),
+            ("Score", self.best_score_var),
+            ("Qty", self.best_qty_var),
+            ("Leverage", self.best_leverage_var),
+            ("Risk (Target/Actual)", self.best_risk_var),
+        ]
+
+        for idx, (label, var) in enumerate(rows):
+            row = idx // 4
+            col = (idx % 4) * 2
+            ttk.Label(best_grid, text=f"{label}:", style="Secondary.TLabel").grid(
+                row=row, column=col, sticky="w", padx=(0, 6), pady=3
+            )
+            ttk.Label(best_grid, textvariable=var, style="Normal.TLabel").grid(
+                row=row, column=col + 1, sticky="w", padx=(0, 18), pady=3
+            )
+
+        for col in range(8):
+            best_grid.columnconfigure(col, weight=1)
+
+        details_frame = ttk.Frame(best_frame, style="Card.TFrame")
+        details_frame.pack(fill="x", pady=(8, 0))
+
+        ttk.Label(details_frame, text="Əlavə məlumat / səbəb:", style="Secondary.TLabel").pack(
+            anchor="w", pady=(0, 4)
+        )
+        self.best_details = tk.Text(
+            details_frame,
+            height=4,
+            wrap="word",
+            bg=ModernStyle.BG_LIGHT,
+            fg=ModernStyle.TEXT_PRIMARY,
+            insertbackground=ModernStyle.ACCENT_PRIMARY,
+            font=ModernStyle.FONT_MAIN,
+            relief="flat",
+            padx=8,
+            pady=6,
+        )
+        self.best_details.pack(fill="x")
+        self.best_details.configure(state="disabled")
+
+        form_frame = ttk.LabelFrame(
+            best_frame,
+            text="🧾 Binance Futures Form",
+            style="Card.TLabelframe",
+            padding=10,
+        )
+        form_frame.pack(fill="x", pady=(10, 0))
+
+        form_grid = ttk.Frame(form_frame, style="Card.TFrame")
+        form_grid.pack(fill="x")
+
+        form_rows = [
+            ("Market", self.best_form_market_var),
+            ("Margin", self.best_form_margin_var),
+            ("Leverage", self.best_form_leverage_var),
+            ("Tab", self.best_form_tab_var),
+            ("Price (Entry)", self.best_form_price_var),
+            ("Size (Qty)", self.best_form_qty_var),
+            ("Take Profit (TP2)", self.best_form_tp_var),
+            ("Stop Loss", self.best_form_sl_var),
+            ("TIF", self.best_form_tif_var),
+            ("Action", self.best_form_action_var),
+            ("Reduce-Only", self.best_form_reduce_only_var),
+        ]
+
+        for idx, (label, var) in enumerate(form_rows):
+            row = idx // 3
+            col = (idx % 3) * 2
+            ttk.Label(form_grid, text=f"{label}:", style="Secondary.TLabel").grid(
+                row=row, column=col, sticky="w", padx=(0, 6), pady=3
+            )
+            ttk.Label(form_grid, textvariable=var, style="Normal.TLabel").grid(
+                row=row, column=col + 1, sticky="w", padx=(0, 18), pady=3
+            )
+
+        for col in range(6):
+            form_grid.columnconfigure(col, weight=1)
+
         # Text widget with scrollbar
         txt_frame = ttk.Frame(output_card, style="Card.TFrame")
         txt_frame.pack(fill="both", expand=True)
@@ -804,6 +928,7 @@ class App:
         self.txt.delete("1.0", "end")
         self.txt.insert("end", "🔄 Skan başlayır...\n\n")
         self._update_summary({"ok": 0, "setup": 0, "no": 0, "total": 0, "best": None, "best_fit": 0.0})
+        self._set_best_plan(None)
         self.workflow.reset()
         
         self._set_busy(True)
@@ -860,7 +985,8 @@ class App:
                     "best": best.symbol if best else None,
                     "best_fit": float(best.probability) if best else 0.0,
                 }
-                self._q.put(("done", report, summary))
+                best_payload = self._build_best_payload(best)
+                self._q.put(("done", report, summary, best_payload))
             except Exception as e:
                 self._q.put(("error", str(e)))
         
@@ -887,7 +1013,7 @@ class App:
                     self.workflow.set_stage(text)
                 
                 elif kind == "done":
-                    _, report, summary = msg
+                    _, report, summary, best_payload = msg
                     self.txt.delete("1.0", "end")
                     self.txt.insert("end", report)
                     self.status_var.set("✓ Tamamlandı")
@@ -897,6 +1023,7 @@ class App:
                     self.stage_var.set("✓ Hazır")
                     self.workflow.set_stage("report")
                     self._update_summary(summary)
+                    self._set_best_plan(best_payload)
                 
                 elif kind == "error":
                     _, err = msg
@@ -922,3 +1049,101 @@ class App:
         self.no_var.set(f"NO_TRADE: {no}")
         self.best_var.set(f"Best: {best} ({best_fit:.1f}%) / {total}")
         self.summary_chart.set_counts(ok, setup, no)
+
+    def _build_best_payload(self, best) -> Optional[dict]:
+        if not best:
+            return None
+        return {
+            "symbol": best.symbol,
+            "status": best.status,
+            "side": best.side,
+            "entry": float(best.entry),
+            "sl": float(best.sl),
+            "tp1": float(best.tp1),
+            "tp2": float(best.tp2),
+            "rr1": float(best.rr1),
+            "rr2": float(best.rr2),
+            "fit": float(best.probability),
+            "score": float(best.score),
+            "qty": float(best.qty),
+            "leverage": int(best.leverage),
+            "risk_target": float(best.risk_target),
+            "risk_actual": float(best.risk_actual),
+            "reason": best.reason,
+            "details": dict(best.details) if best.details else {},
+        }
+
+    def _set_best_plan(self, best: Optional[dict]) -> None:
+        if not best:
+            placeholders = {
+                self.best_symbol_var: "-",
+                self.best_status_var: "-",
+                self.best_side_var: "-",
+                self.best_entry_var: "-",
+                self.best_sl_var: "-",
+                self.best_tp1_var: "-",
+                self.best_tp2_var: "-",
+                self.best_rr_var: "-",
+                self.best_fit_var: "-",
+                self.best_score_var: "-",
+                self.best_qty_var: "-",
+                self.best_leverage_var: "-",
+                self.best_risk_var: "-",
+            }
+            for var, value in placeholders.items():
+                var.set(value)
+            self._set_best_details("Skan nəticəsi gözlənilir.")
+            self._set_best_form(None)
+            return
+
+        self.best_symbol_var.set(best.get("symbol", "-"))
+        self.best_status_var.set(best.get("status", "-"))
+        self.best_side_var.set(best.get("side", "-"))
+        self.best_entry_var.set(f'{best.get("entry", 0.0):.6f}')
+        self.best_sl_var.set(f'{best.get("sl", 0.0):.6f}')
+        self.best_tp1_var.set(f'{best.get("tp1", 0.0):.6f}')
+        self.best_tp2_var.set(f'{best.get("tp2", 0.0):.6f}')
+        self.best_rr_var.set(f'{best.get("rr1", 0.0):.2f} / {best.get("rr2", 0.0):.2f}')
+        self.best_fit_var.set(f'{best.get("fit", 0.0):.1f}%')
+        self.best_score_var.set(f'{best.get("score", 0.0):.2f}')
+        self.best_qty_var.set(f'{best.get("qty", 0.0):.6f}')
+        self.best_leverage_var.set(f'{best.get("leverage", 0)}x')
+        self.best_risk_var.set(
+            f'{best.get("risk_target", 0.0):.4f} / {best.get("risk_actual", 0.0):.4f} USDT'
+        )
+
+        details_lines = [f"Səbəb: {best.get('reason', '-')}".strip()]
+        for key, value in (best.get("details") or {}).items():
+            details_lines.append(f"• {key}: {value}")
+        self._set_best_details("\n".join(details_lines))
+        self._set_best_form(best)
+
+    def _set_best_details(self, text: str) -> None:
+        self.best_details.configure(state="normal")
+        self.best_details.delete("1.0", "end")
+        self.best_details.insert("end", text)
+        self.best_details.configure(state="disabled")
+
+    def _set_best_form(self, best: Optional[dict]) -> None:
+        if not best:
+            self.best_form_market_var.set("-")
+            self.best_form_leverage_var.set("-")
+            self.best_form_price_var.set("-")
+            self.best_form_qty_var.set("-")
+            self.best_form_tp_var.set("-")
+            self.best_form_sl_var.set("-")
+            self.best_form_action_var.set("-")
+            self.best_form_tif_var.set("GTC")
+            self.best_form_margin_var.set("Isolated")
+            self.best_form_tab_var.set("Limit")
+            self.best_form_reduce_only_var.set("OFF (entry açırsan)")
+            return
+
+        side = best.get("side", "-")
+        self.best_form_market_var.set(best.get("symbol", "-"))
+        self.best_form_leverage_var.set(f'{best.get("leverage", 0)}x')
+        self.best_form_price_var.set(f'{best.get("entry", 0.0):.6f}')
+        self.best_form_qty_var.set(f'{best.get("qty", 0.0):.6f}')
+        self.best_form_tp_var.set(f'{best.get("tp2", 0.0):.6f}')
+        self.best_form_sl_var.set(f'{best.get("sl", 0.0):.6f}')
+        self.best_form_action_var.set("Buy/Long" if side == "LONG" else "Sell/Short")
