@@ -581,6 +581,90 @@ def _build_measurement_setup(
     )
 
 
+def _fallback_bias(ema_bias: Optional[str], pd_bias: Optional[str], df_impulse: pd.DataFrame) -> Optional[str]:
+    if ema_bias in ("LONG", "SHORT"):
+        return ema_bias
+    if pd_bias in ("LONG", "SHORT"):
+        return pd_bias
+    if len(df_impulse) >= 55:
+        ema50 = _ema(df_impulse["close"], 50).iloc[-1]
+        last = float(df_impulse["close"].iloc[-1])
+        return "LONG" if last >= ema50 else "SHORT"
+    return None
+
+
+def _build_fallback_setup(
+    df_impulse: pd.DataFrame,
+    side: str,
+    atr: float,
+    min_rr2: float,
+    cfg: Dict[str, Any],
+) -> Optional[Analysis]:
+    if atr <= 0 or not np.isfinite(atr):
+        return None
+    last_close = float(df_impulse["close"].iloc[-1])
+    sl_buffer = float(cfg.get("sl_atr_mult", 1.2))
+    risk = atr * sl_buffer
+    if risk <= 0:
+        return None
+    rr2 = max(min_rr2, 2.0)
+    if side == "LONG":
+        entry = last_close
+        sl = entry - risk
+        tp1 = entry + risk
+        tp2 = entry + risk * rr2
+    else:
+        entry = last_close
+        sl = entry + risk
+        tp1 = entry - risk
+        tp2 = entry - risk * rr2
+    return Analysis(
+        status="SETUP",
+        side=side,
+        entry=float(entry),
+        sl=float(sl),
+        tp1=float(tp1),
+        tp2=float(tp2),
+        rr1=1.0,
+        rr2=float(rr2),
+        score=float(rr2 * 0.4),
+        reason="Fallback bias plan (setup tapılmadı, trend yönü ilə ehtiyatlı plan)",
+        details={
+            "fallback": True,
+            "atr": float(atr),
+        },
+    )
+
+
+def _micro_confirmation(
+    df_micro: pd.DataFrame,
+    side: str,
+    zone_low: float,
+    zone_high: float,
+    tol: float,
+) -> Tuple[bool, Optional[str]]:
+    if df_micro.empty:
+        return False, None
+    last_close = float(df_micro["close"].iloc[-1])
+    if not _in_zone(last_close, zone_low, zone_high, tol):
+        return False, None
+    if side == "LONG":
+        if _bullish_engulfing(df_micro):
+            return True, "bullish_engulfing"
+        if _morning_star(df_micro):
+            return True, "morning_star"
+        if _rejection_wick(df_micro, "LONG", zone_low, zone_high):
+            return True, "rejection_wick"
+    else:
+        if _bearish_engulfing(df_micro):
+            return True, "bearish_engulfing"
+        if _evening_star(df_micro):
+            return True, "evening_star"
+        if _rejection_wick(df_micro, "SHORT", zone_low, zone_high):
+            return True, "rejection_wick"
+    return False, None
+
+
 def analyze_symbol(
     symbol: str,
     fetch_ohlcv: Callable[[str, str, int], pd.DataFrame],
@@ -608,6 +692,7 @@ def analyze_symbol(
     impulse_tf = strategy_cfg.get("impulse_timeframe", "1h")
     confirm_tf = strategy_cfg.get("confirm_timeframe", "15m")
     measurement_tf = strategy_cfg.get("measurement_timeframe", confirm_tf)
+    micro_tf = strategy_cfg.get("micro_confirm_timeframe")
 
     tf_cache: Dict[str, pd.DataFrame] = {}
 
@@ -652,6 +737,20 @@ def analyze_symbol(
             candidates.append(measurement)
 
     if not candidates:
+        fallback_side = _fallback_bias(ema_bias, pd_bias, df_impulse)
+        if fallback_side:
+            fallback = _build_fallback_setup(df_impulse, fallback_side, atr1, min_rr2, strategy_cfg)
+            if fallback:
+                if fallback.details is not None:
+                    fallback.details = {
+                        **fallback.details,
+                        "ema_bias": ema_bias,
+                        "premium_discount_bias": pd_bias,
+                        "impulse_timeframe": impulse_tf,
+                        "confirm_timeframe": confirm_tf,
+                        "measurement_timeframe": measurement_tf,
+                    }
+                return fallback
         return Analysis(status="NO_TRADE", side="-", reason="Uyğun setup tapılmadı (Codex filtrləri)")
 
     best = max(candidates, key=lambda x: x.score)
@@ -668,17 +767,47 @@ def analyze_symbol(
         best.reason = f"{best.reason} | RR aşağıdır ({best.rr2:.2f} < {min_rr2})"
         best.status = "SETUP"
 
+    if on_stage:
+        on_stage("score")
+
+    micro_confirmation = False
+    micro_pattern = None
+    zone_low = None
+    zone_high = None
+    if best.details is not None:
+        zone_low = best.details.get("zone_low", best.details.get("entry_zone_low"))
+        zone_high = best.details.get("zone_high", best.details.get("entry_zone_high"))
+    if micro_tf and zone_low is not None and zone_high is not None:
+        df_micro = _fetch_tf(str(micro_tf))
+        tol = _zone_tolerance(
+            float(df_impulse["close"].iloc[-1]),
+            atr1,
+            float(strategy_cfg.get("zone_tolerance_atr", 0.25)),
+            float(strategy_cfg.get("zone_tolerance_pct", 0.002)),
+        )
+        micro_confirmation, micro_pattern = _micro_confirmation(
+            df_micro,
+            best.side,
+            float(zone_low),
+            float(zone_high),
+            tol,
+        )
+
     scoring_cfg = settings.get("scoring", {})
     w_rr2 = float(scoring_cfg.get("w_rr2", 10.0))
     w_trend = float(scoring_cfg.get("w_trend", 5.0))
     w_conf = float(scoring_cfg.get("w_confluence", 3.0))
     w_conf_count = float(scoring_cfg.get("w_confluence_count", 1.0))
     w_confirmation = float(scoring_cfg.get("w_confirmation", 2.0))
+    w_micro_confirmation = float(scoring_cfg.get("w_micro_confirmation", 1.5))
 
     trend_bonus = 1.0 if best.side == ema_bias else 0.5
     conf_bonus = 1.0 if "(" in best.reason else 0.0
+    if best.details and best.details.get("fallback"):
+        conf_bonus = 0.0
     confluence_count = 0
     confirmation_bonus = 0.0
+    micro_confirmation_bonus = 1.0 if micro_confirmation else 0.0
     if best.details:
         confluence_count = int(best.details.get("confluence_count", 0))
         if best.details.get("confirmation"):
@@ -692,6 +821,7 @@ def analyze_symbol(
         + conf_bonus * w_conf
         + confluence_count * w_conf_count
         + confirmation_bonus * w_confirmation
+        + micro_confirmation_bonus * w_micro_confirmation
     ) * penalty
     if best.details is not None:
         best.details = {
@@ -715,12 +845,16 @@ def analyze_symbol(
             "impulse_timeframe": impulse_tf,
             "confirm_timeframe": confirm_tf,
             "measurement_timeframe": measurement_tf,
+            "micro_confirm_timeframe": micro_tf,
+            "micro_confirmation": bool(micro_confirmation),
+            "micro_confirmation_pattern": micro_pattern,
             "score_components": {
                 "rr2": best.rr2 * w_rr2,
                 "trend": trend_bonus * w_trend,
                 "confluence": conf_bonus * w_conf,
                 "confluence_count": confluence_count * w_conf_count,
                 "confirmation": confirmation_bonus * w_confirmation,
+                "micro_confirmation": micro_confirmation_bonus * w_micro_confirmation,
             },
         }
 
