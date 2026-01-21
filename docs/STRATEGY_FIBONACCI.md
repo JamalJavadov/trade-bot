@@ -108,6 +108,10 @@ The bot does not “predict guaranteed success.” It ranks trades by **objectiv
 
 The coin with the **highest score** is presented as the **BEST PLAN**.
 
+**Fit Probability (Uyğunluq faizi)**
+- Each coin gets a **fit percentage** based on its score relative to the best score in the scan.
+- This is **not a guaranteed win rate**; it reflects *how well the coin matches the strategy rules*.
+
 ## 9) Operational Checklist (Human or Bot)
 1. Identify 4H trend bias (EMA or premium/discount).
 2. Find impulse leg on 1H and draw Fibonacci.
@@ -115,7 +119,8 @@ The coin with the **highest score** is presented as the **BEST PLAN**.
 4. Require at least one confluence.
 5. Confirm with a candlestick reversal or rejection wick.
 6. Compute SL/TPs and RR.
-7. If all rules pass → **OK**. Else → **SETUP** (watch).
+7. Use **pending limit orders** at the planned entry price (no market chase).
+8. If all rules pass → **OK**. Else → **SETUP** (watch).
 
 ## 10) Parameters (Bot Settings Reference)
 Key settings in `settings.json`:
