@@ -13,7 +13,6 @@ from ..core.planner import (
     save_settings,
     run_scan_and_build_best_plan,
     format_report,
-    save_scan_results,
 )
 
 
@@ -41,6 +40,8 @@ class ModernStyle:
     FONT_MAIN = ("Segoe UI", 11)
     FONT_HEADER = ("Segoe UI Semibold", 12)
     FONT_TITLE = ("Segoe UI Bold", 14)
+    FONT_HERO = ("Segoe UI Bold", 18)
+    FONT_HERO_SUB = ("Segoe UI Semibold", 11)
     FONT_SUBTITLE = ("Segoe UI Semibold", 11)
     FONT_MONO = ("Consolas", 10)
 
@@ -108,6 +109,66 @@ class AnimatedProgressBar(ttk.Frame):
                     outline="",
                     stipple="gray50"
                 )
+
+
+class ConfidenceMeter(ttk.Frame):
+    """Vizual ehtimal göstəricisi."""
+
+    def __init__(self, parent, **kwargs):
+        super().__init__(parent, **kwargs)
+        self.canvas = tk.Canvas(
+            self,
+            height=28,
+            bg=ModernStyle.BG_MEDIUM,
+            highlightthickness=0,
+            bd=0,
+        )
+        self.canvas.pack(fill="x", expand=True)
+        self.value = 0.0
+        self.target = 0.0
+        self._animating = False
+
+    def set_value(self, value: float) -> None:
+        self.target = max(0.0, min(100.0, float(value)))
+        if not self._animating:
+            self._animating = True
+            self._animate()
+
+    def _animate(self) -> None:
+        if abs(self.value - self.target) < 0.2:
+            self.value = self.target
+            self._animating = False
+            self._draw()
+            return
+        step = 1.5 if self.target > self.value else -1.5
+        self.value = max(0.0, min(100.0, self.value + step))
+        self._draw()
+        self.after(12, self._animate)
+
+    def _draw(self) -> None:
+        self.canvas.delete("all")
+        width = self.canvas.winfo_width()
+        height = self.canvas.winfo_height()
+        if width <= 1 or height <= 1:
+            return
+        self.canvas.create_rectangle(
+            0, 0, width, height,
+            fill=ModernStyle.BG_LIGHT,
+            outline="",
+        )
+        fill_width = int((self.value / 100.0) * width)
+        self.canvas.create_rectangle(
+            0, 0, fill_width, height,
+            fill=ModernStyle.ACCENT_SUCCESS if self.value >= 65 else ModernStyle.ACCENT_WARNING,
+            outline="",
+        )
+        self.canvas.create_text(
+            width / 2,
+            height / 2,
+            text=f"{self.value:.1f}%",
+            fill=ModernStyle.TEXT_PRIMARY,
+            font=ModernStyle.FONT_SUBTITLE,
+        )
 
 
 class StatusIndicator(tk.Canvas):
@@ -1089,6 +1150,87 @@ class App:
         )
         best_frame.pack(fill="x", pady=(0, 10))
 
+        self.best_headline_var = tk.StringVar(value="-")
+        self.best_subtitle_var = tk.StringVar(value="Skan nəticəsi gözlənilir.")
+        self.best_fit_pct_var = tk.StringVar(value="-")
+        self.best_score_short_var = tk.StringVar(value="-")
+        self.best_rr_short_var = tk.StringVar(value="-")
+        self.best_entry_short_var = tk.StringVar(value="-")
+
+        hero_frame = ttk.Frame(best_frame, style="Card.TFrame")
+        hero_frame.pack(fill="x", pady=(0, 10))
+
+        hero_left = tk.Frame(
+            hero_frame,
+            bg=ModernStyle.BG_ELEVATED,
+            highlightthickness=1,
+            highlightbackground=ModernStyle.ACCENT_PRIMARY,
+        )
+        hero_left.pack(side="left", fill="both", expand=True, padx=(0, 8))
+
+        tk.Label(
+            hero_left,
+            text="TOP SIGNAL",
+            bg=ModernStyle.BG_ELEVATED,
+            fg=ModernStyle.ACCENT_INFO,
+            font=ModernStyle.FONT_SUBTITLE,
+        ).pack(anchor="w", padx=10, pady=(8, 0))
+        tk.Label(
+            hero_left,
+            textvariable=self.best_headline_var,
+            bg=ModernStyle.BG_ELEVATED,
+            fg=ModernStyle.TEXT_PRIMARY,
+            font=ModernStyle.FONT_HERO,
+        ).pack(anchor="w", padx=10)
+        tk.Label(
+            hero_left,
+            textvariable=self.best_subtitle_var,
+            bg=ModernStyle.BG_ELEVATED,
+            fg=ModernStyle.TEXT_SECONDARY,
+            font=ModernStyle.FONT_HERO_SUB,
+        ).pack(anchor="w", padx=10, pady=(0, 8))
+
+        hero_center = tk.Frame(
+            hero_frame,
+            bg=ModernStyle.BG_ELEVATED,
+            highlightthickness=1,
+            highlightbackground=ModernStyle.ACCENT_SUCCESS,
+        )
+        hero_center.pack(side="left", fill="both", expand=True, padx=8)
+
+        tk.Label(
+            hero_center,
+            text="Uğurluluq faizi",
+            bg=ModernStyle.BG_ELEVATED,
+            fg=ModernStyle.TEXT_SECONDARY,
+            font=ModernStyle.FONT_SUBTITLE,
+        ).pack(anchor="w", padx=10, pady=(8, 4))
+        self.best_confidence_meter = ConfidenceMeter(hero_center)
+        self.best_confidence_meter.pack(fill="x", padx=10)
+        tk.Label(
+            hero_center,
+            textvariable=self.best_fit_pct_var,
+            bg=ModernStyle.BG_ELEVATED,
+            fg=ModernStyle.TEXT_PRIMARY,
+            font=ModernStyle.FONT_HEADER,
+        ).pack(anchor="w", padx=10, pady=(4, 8))
+
+        hero_right = ttk.Frame(hero_frame, style="Card.TFrame")
+        hero_right.pack(side="left", fill="both", expand=True, padx=(8, 0))
+
+        metric_grid = ttk.Frame(hero_right, style="Card.TFrame")
+        metric_grid.pack(fill="both", expand=True)
+
+        metric_items = [
+            ("Score", self.best_score_short_var, ModernStyle.ACCENT_PRIMARY),
+            ("RR2", self.best_rr_short_var, ModernStyle.ACCENT_PURPLE),
+            ("Entry", self.best_entry_short_var, ModernStyle.ACCENT_INFO),
+        ]
+        for idx, (title, var, accent) in enumerate(metric_items):
+            tile = self._create_metric_tile(metric_grid, title, var, accent)
+            tile.grid(row=0, column=idx, padx=6, sticky="ew")
+            metric_grid.columnconfigure(idx, weight=1)
+
         self.best_symbol_var = tk.StringVar(value="-")
         self.best_status_var = tk.StringVar(value="-")
         self.best_side_var = tk.StringVar(value="-")
@@ -1166,6 +1308,32 @@ class App:
         )
         self.best_details.pack(fill="x")
         self.best_details.configure(state="disabled")
+
+        manual_frame = ttk.LabelFrame(
+            best_frame,
+            text="✅ Manual Əməliyyat Addımları",
+            style="Card.TLabelframe",
+            padding=10,
+        )
+        manual_frame.pack(fill="x", pady=(10, 0))
+
+        self.manual_steps_vars = [
+            tk.StringVar(value="1) Simvolu və tərəfi təsdiqlə."),
+            tk.StringVar(value="2) Entry qiymətinin zona ilə uyğunluğunu yoxla."),
+            tk.StringVar(value="3) Qty və leverage dəyərlərini tətbiq et."),
+            tk.StringVar(value="4) TP2 və SL limitlərini yerləşdir."),
+            tk.StringVar(value="5) TIF = GTC, Reduce-only = OFF (entry açırsan)."),
+            tk.StringVar(value="6) SETUP olduqda 5m təsdiqini gözlə."),
+        ]
+        for var in self.manual_steps_vars:
+            tk.Label(
+                manual_frame,
+                textvariable=var,
+                bg=ModernStyle.BG_MEDIUM,
+                fg=ModernStyle.TEXT_SECONDARY,
+                font=ModernStyle.FONT_MAIN,
+                anchor="w",
+            ).pack(fill="x", pady=2)
 
         form_frame = ttk.LabelFrame(
             best_frame,
@@ -1258,6 +1426,30 @@ class App:
             pady=8,
         )
         label.pack(fill="both", expand=True)
+        return frame
+
+    def _create_metric_tile(self, parent, title: str, var: tk.StringVar, accent: str) -> tk.Frame:
+        frame = tk.Frame(
+            parent,
+            bg=ModernStyle.BG_ELEVATED,
+            highlightthickness=1,
+            highlightbackground=accent,
+            highlightcolor=accent,
+        )
+        tk.Label(
+            frame,
+            text=title,
+            bg=ModernStyle.BG_ELEVATED,
+            fg=ModernStyle.TEXT_MUTED,
+            font=ModernStyle.FONT_SUBTITLE,
+        ).pack(anchor="w", padx=10, pady=(6, 0))
+        tk.Label(
+            frame,
+            textvariable=var,
+            bg=ModernStyle.BG_ELEVATED,
+            fg=ModernStyle.TEXT_PRIMARY,
+            font=ModernStyle.FONT_HEADER,
+        ).pack(anchor="w", padx=10, pady=(0, 8))
         return frame
     
     def _symbols_count_text(self) -> str:
@@ -1386,8 +1578,7 @@ class App:
                     on_progress=on_progress,
                     on_stage=on_stage,
                 )
-                snapshot_path = save_scan_results(results, best, settings)
-                report = format_report(results, best, settings, snapshot_path=snapshot_path)
+                report = format_report(results, best, settings, snapshot_path=None)
                 summary = {
                     "ok": len([r for r in results if r.status == "OK"]),
                     "setup": len([r for r in results if r.status == "SETUP"]),
@@ -1490,6 +1681,13 @@ class App:
 
     def _set_best_plan(self, best: Optional[dict]) -> None:
         if not best:
+            self.best_headline_var.set("-")
+            self.best_subtitle_var.set("Skan nəticəsi gözlənilir.")
+            self.best_fit_pct_var.set("-")
+            self.best_score_short_var.set("-")
+            self.best_rr_short_var.set("-")
+            self.best_entry_short_var.set("-")
+            self.best_confidence_meter.set_value(0.0)
             placeholders = [
                 (self.best_symbol_var, "-"),
                 (self.best_status_var, "-"),
@@ -1509,7 +1707,24 @@ class App:
                 var.set(value)
             self._set_best_details("Skan nəticəsi gözlənilir.")
             self._set_best_form(None)
+            self._set_manual_steps(None)
             return
+
+        symbol = best.get("symbol", "-")
+        side = best.get("side", "-")
+        status = best.get("status", "-")
+        fit = float(best.get("fit", 0.0))
+        score = float(best.get("score", 0.0))
+        rr2 = float(best.get("rr2", 0.0))
+        entry = float(best.get("entry", 0.0))
+
+        self.best_headline_var.set(f"{symbol} • {side}")
+        self.best_subtitle_var.set(f"{status} status • {fit:.1f}% ehtimal")
+        self.best_fit_pct_var.set(f"Fit: {fit:.1f}%")
+        self.best_score_short_var.set(f"{score:.2f}")
+        self.best_rr_short_var.set(f"{rr2:.2f}")
+        self.best_entry_short_var.set(f"{entry:.6f}")
+        self.best_confidence_meter.set_value(fit)
 
         self.best_symbol_var.set(best.get("symbol", "-"))
         self.best_status_var.set(best.get("status", "-"))
@@ -1532,6 +1747,7 @@ class App:
             details_lines.append(f"• {key}: {value}")
         self._set_best_details("\n".join(details_lines))
         self._set_best_form(best)
+        self._set_manual_steps(best)
 
     def _set_best_details(self, text: str) -> None:
         self.best_details.configure(state="normal")
@@ -1562,3 +1778,42 @@ class App:
         self.best_form_tp_var.set(f'{best.get("tp2", 0.0):.6f}')
         self.best_form_sl_var.set(f'{best.get("sl", 0.0):.6f}')
         self.best_form_action_var.set("Buy/Long" if side == "LONG" else "Sell/Short")
+
+    def _set_manual_steps(self, best: Optional[dict]) -> None:
+        if not best:
+            default_steps = [
+                "1) Simvolu və tərəfi təsdiqlə.",
+                "2) Entry qiymətinin zona ilə uyğunluğunu yoxla.",
+                "3) Qty və leverage dəyərlərini tətbiq et.",
+                "4) TP2 və SL limitlərini yerləşdir.",
+                "5) TIF = GTC, Reduce-only = OFF (entry açırsan).",
+                "6) SETUP olduqda 5m təsdiqini gözlə.",
+            ]
+            for var, text in zip(self.manual_steps_vars, default_steps):
+                var.set(text)
+            return
+
+        side = best.get("side", "-")
+        symbol = best.get("symbol", "-")
+        entry = float(best.get("entry", 0.0))
+        sl = float(best.get("sl", 0.0))
+        tp2 = float(best.get("tp2", 0.0))
+        leverage = int(best.get("leverage", 0))
+        qty = float(best.get("qty", 0.0))
+        status = best.get("status", "-")
+        caution = "SETUP" if status == "SETUP" else "OK"
+
+        steps = [
+            f"1) {symbol} {side} əməliyyatı üçün giriş planını təsdiqlə ({caution}).",
+            f"2) Entry zona: {entry:.6f} — qiymət uyğunlaşmasını yoxla.",
+            f"3) Qty: {qty:.6f} | Leverage: {leverage}x (Isolated).",
+            f"4) Take Profit (TP2): {tp2:.6f} | Stop Loss: {sl:.6f}.",
+            "5) TIF = GTC, Reduce-only = OFF (entry açırsan).",
+        ]
+        if status == "SETUP":
+            steps.append("6) SETUP üçün 5m təsdiqini gözlə (sweep + close).")
+        for idx, var in enumerate(self.manual_steps_vars):
+            if idx < len(steps):
+                var.set(steps[idx])
+            else:
+                var.set("")
