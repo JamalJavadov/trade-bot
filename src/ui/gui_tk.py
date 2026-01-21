@@ -520,6 +520,9 @@ class App:
     
     def _symbols_count_text(self) -> str:
         s = self.settings.get("symbols", {})
+        if bool(s.get("auto_top_usdtm", False)):
+            limit = int(s.get("top_limit", 200))
+            return f"📊 Simvollar: Binance Top {limit} (USDT-M PERP)"
         if bool(s.get("auto_all_usdtm", False)):
             return "📊 Simvollar: AUTO (bütün USDT-M) — skan zamanı yüklənəcək"
         lst = s.get("list", []) or s.get("default", []) or []
@@ -597,7 +600,10 @@ class App:
                 settings = load_settings("settings.json")
                 
                 sym_cfg = settings.get("symbols", {})
-                if bool(sym_cfg.get("auto_all_usdtm", False)):
+                if bool(sym_cfg.get("auto_top_usdtm", False)):
+                    limit = int(sym_cfg.get("top_limit", 200))
+                    symbols = binance_data.list_usdtm_perp_symbols_by_volume(limit=limit)
+                elif bool(sym_cfg.get("auto_all_usdtm", False)):
                     symbols = binance_data.list_usdtm_perp_symbols()
                 else:
                     symbols = sym_cfg.get("list", []) or sym_cfg.get("default", []) or []
