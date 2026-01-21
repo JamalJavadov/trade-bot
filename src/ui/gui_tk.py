@@ -1258,6 +1258,14 @@ class App:
         self.pending_order_type_var = tk.StringVar(value="Limit (Pending)")
         self.pending_order_entry_trigger_var = tk.StringVar(value="Mark")
         self.pending_order_tpsl_trigger_var = tk.StringVar(value="Mark")
+        self.pending_order_symbol_var = tk.StringVar(value="-")
+        self.pending_order_side_var = tk.StringVar(value="-")
+        self.pending_order_entry_var = tk.StringVar(value="-")
+        self.pending_order_qty_var = tk.StringVar(value="-")
+        self.pending_order_tp_var = tk.StringVar(value="-")
+        self.pending_order_sl_var = tk.StringVar(value="-")
+        self.pending_order_leverage_var = tk.StringVar(value="-")
+        self.pending_order_margin_var = tk.StringVar(value="Isolated")
         expiry_days = int(self.settings.get("risk", {}).get("max_orders_expiry_days", 7))
         self.pending_order_expiry_var = tk.StringVar(value=f"{expiry_days} gün")
         self.pending_order_notional_var = tk.StringVar(value="-")
@@ -1392,14 +1400,22 @@ class App:
         pending_grid.pack(fill="x")
 
         pending_rows = [
+            ("Market", self.pending_order_symbol_var),
+            ("Side", self.pending_order_side_var),
             ("Order Type", self.pending_order_type_var),
+            ("Entry", self.pending_order_entry_var),
+            ("Size (Qty)", self.pending_order_qty_var),
+            ("Notional", self.pending_order_notional_var),
+            ("Take Profit (TP2)", self.pending_order_tp_var),
+            ("Stop Loss", self.pending_order_sl_var),
+            ("Leverage", self.pending_order_leverage_var),
+            ("Margin", self.pending_order_margin_var),
             ("Entry Trigger", self.pending_order_entry_trigger_var),
             ("TP/SL Trigger", self.pending_order_tpsl_trigger_var),
             ("Action", self.best_form_action_var),
             ("TIF", self.best_form_tif_var),
             ("Reduce-Only", self.best_form_reduce_only_var),
             ("Expiry", self.pending_order_expiry_var),
-            ("Notional", self.pending_order_notional_var),
             ("Pending Status", self.pending_order_status_var),
         ]
 
@@ -1829,12 +1845,25 @@ class App:
             self.pending_order_type_var.set("Limit (Pending)")
             self.pending_order_entry_trigger_var.set("Mark")
             self.pending_order_tpsl_trigger_var.set("Mark")
+            self.pending_order_symbol_var.set("-")
+            self.pending_order_side_var.set("-")
+            self.pending_order_entry_var.set("-")
+            self.pending_order_qty_var.set("-")
+            self.pending_order_tp_var.set("-")
+            self.pending_order_sl_var.set("-")
+            self.pending_order_leverage_var.set("-")
+            self.pending_order_margin_var.set("Isolated")
             self.pending_order_notional_var.set("-")
             self.pending_order_status_var.set("-")
             return
 
+        symbol = best.get("symbol", "-")
+        side = best.get("side", "-")
         entry = float(best.get("entry", 0.0))
         qty = float(best.get("qty", 0.0))
+        tp2 = float(best.get("tp2", 0.0))
+        sl = float(best.get("sl", 0.0))
+        leverage = int(best.get("leverage", 0))
         notional = entry * qty
         status = best.get("status", "-")
 
@@ -1848,6 +1877,14 @@ class App:
         self.pending_order_type_var.set("Limit (Pending)")
         self.pending_order_entry_trigger_var.set("Mark")
         self.pending_order_tpsl_trigger_var.set("Mark")
+        self.pending_order_symbol_var.set(symbol)
+        self.pending_order_side_var.set(side)
+        self.pending_order_entry_var.set(f"{entry:.6f}")
+        self.pending_order_qty_var.set(f"{qty:.6f}")
+        self.pending_order_tp_var.set(f"{tp2:.6f}")
+        self.pending_order_sl_var.set(f"{sl:.6f}")
+        self.pending_order_leverage_var.set(f"{leverage}x")
+        self.pending_order_margin_var.set("Isolated")
         self.pending_order_notional_var.set(
             f"{notional:.4f} USDT" if notional > 0 else "-"
         )
