@@ -64,6 +64,31 @@ def list_usdtm_perp_symbols() -> List[str]:
     return out
 
 
+def list_usdtm_perp_symbols_by_volume(limit: int = 200) -> List[str]:
+    tickers = client.futures_ticker()
+    volumes = {}
+    for t in tickers:
+        symbol = t.get("symbol")
+        if not symbol:
+            continue
+        meta = _symbol_meta(symbol)
+        if not meta:
+            continue
+        if (
+            meta.get("status") != "TRADING"
+            or meta.get("quoteAsset") != "USDT"
+            or meta.get("contractType") != "PERPETUAL"
+        ):
+            continue
+        try:
+            volumes[symbol] = float(t.get("quoteVolume", 0.0))
+        except (TypeError, ValueError):
+            volumes[symbol] = 0.0
+
+    ranked = sorted(volumes.items(), key=lambda item: item[1], reverse=True)
+    return [symbol for symbol, _ in ranked[:limit]]
+
+
 @lru_cache(maxsize=4096)
 def get_symbol_filters(symbol: str) -> Dict[str, float]:
     m = _symbol_meta(symbol) or {}
