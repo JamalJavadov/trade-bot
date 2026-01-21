@@ -121,11 +121,25 @@
       0.5,
       0.5
     ],
-    "min_rr2": 2.0
+    "min_rr2": 2.0,
+    "max_entry_distance_atr": 2.0
   },
   "scoring": {
     "w_rr2": 10.0,
     "w_trend": 5.0,
     "w_confluence": 3.0
+  },
+  "scan": {
+    "limit_15m": 500
+  },
+  "strategy": {
+    "impulse_lookback": 240,
+    "htf_range_lookback": 200,
+    "min_confluence": 1,
+    "require_confluence": true,
+    "allow_setup_if_no_confirm": true,
+    "zone_tolerance_atr": 0.25,
+    "zone_tolerance_pct": 0.002,
+    "sl_atr_mult": 1.2
   }
 }

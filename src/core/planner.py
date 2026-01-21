@@ -51,9 +51,24 @@ def load_settings(path: str) -> Dict[str, Any]:
         return {
             "symbols": {"list": ["BTCUSDT", "ETHUSDT"], "auto_all_usdtm": False},
             "budget": {"default_usdt": 5.0},
-            "risk": {"risk_pct": 0.10, "leverage": 3, "min_rr2": 2.0},
-            "scan": {"limit_4h": 500, "limit_1h": 500, "limit_5m": 300, "sleep_ms": 0},
-            "plan": {"require_liquidity_sweep": True, "allow_setup_if_no_confirm": True, "expiry_days": 7},
+            "risk": {
+                "risk_pct": 0.10,
+                "leverage": 3,
+                "min_rr2": 2.0,
+                "max_entry_distance_atr": 2.0,
+                "sl_atr_mult": 1.2,
+            },
+            "scan": {"limit_4h": 500, "limit_1h": 500, "limit_15m": 500, "sleep_ms": 0},
+            "strategy": {
+                "impulse_lookback": 240,
+                "htf_range_lookback": 200,
+                "min_confluence": 1,
+                "require_confluence": True,
+                "allow_setup_if_no_confirm": True,
+                "zone_tolerance_atr": 0.25,
+                "zone_tolerance_pct": 0.002,
+                "sl_atr_mult": 1.2,
+            },
         }
     return json.loads(p.read_text(encoding="utf-8"))
 
