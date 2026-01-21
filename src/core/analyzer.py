@@ -779,10 +779,11 @@ def analyze_symbol(
         if golden:
             candidates.append(golden)
 
-    for bias in measurement_biases:
-        measurement = _build_measurement_setup(df_measure, bias, atr1, strategy_cfg)
-        if measurement:
-            candidates.append(measurement)
+    if bool(strategy_cfg.get("allow_measurement_setup", True)):
+        for bias in measurement_biases:
+            measurement = _build_measurement_setup(df_measure, bias, atr1, strategy_cfg)
+            if measurement:
+                candidates.append(measurement)
 
     eligible = [c for c in candidates if c.rr2 >= min_rr2]
     if not eligible:
