@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import time
-from functools import lru_cache
 from typing import Dict, Any, List, Optional
 
 import pandas as pd
@@ -25,12 +24,10 @@ def server_time() -> dict:
     return client.get_server_time()
 
 
-@lru_cache(maxsize=1)
 def futures_exchange_info() -> Dict[str, Any]:
     return client.futures_exchange_info()
 
 
-@lru_cache(maxsize=4096)
 def _symbol_meta(symbol: str) -> Optional[Dict[str, Any]]:
     info = futures_exchange_info()
     for s in info.get("symbols", []):
@@ -64,7 +61,31 @@ def list_usdtm_perp_symbols() -> List[str]:
     return out
 
 
-@lru_cache(maxsize=4096)
+def list_usdtm_perp_symbols_by_volume(limit: int = 200) -> List[str]:
+    tickers = client.futures_ticker()
+    volumes = {}
+    for t in tickers:
+        symbol = t.get("symbol")
+        if not symbol:
+            continue
+        meta = _symbol_meta(symbol)
+        if not meta:
+            continue
+        if (
+            meta.get("status") != "TRADING"
+            or meta.get("quoteAsset") != "USDT"
+            or meta.get("contractType") != "PERPETUAL"
+        ):
+            continue
+        try:
+            volumes[symbol] = float(t.get("quoteVolume", 0.0))
+        except (TypeError, ValueError):
+            volumes[symbol] = 0.0
+
+    ranked = sorted(volumes.items(), key=lambda item: item[1], reverse=True)
+    return [symbol for symbol, _ in ranked[:limit]]
+
+
 def get_symbol_filters(symbol: str) -> Dict[str, float]:
     m = _symbol_meta(symbol) or {}
     tick = 0.0

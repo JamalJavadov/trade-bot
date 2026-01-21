@@ -159,6 +159,174 @@ class StatusIndicator(tk.Canvas):
         self.after(1000, self._pulse)
 
 
+class SummaryChart(tk.Canvas):
+    """Summary bar chart for scan results."""
+
+    def __init__(self, parent, **kwargs):
+        super().__init__(
+            parent,
+            height=120,
+            bg=ModernStyle.BG_MEDIUM,
+            highlightthickness=0,
+            bd=0,
+            **kwargs
+        )
+        self.counts = {"ok": 0, "setup": 0, "no": 0}
+        self.target_counts = dict(self.counts)
+        self._animating = False
+        self.bind("<Configure>", lambda _: self._draw())
+
+    def set_counts(self, ok: int, setup: int, no: int) -> None:
+        self.target_counts = {"ok": ok, "setup": setup, "no": no}
+        if not self._animating:
+            self._animating = True
+            self._animate()
+
+    def _animate(self):
+        done = True
+        for key in self.counts:
+            current = self.counts[key]
+            target = self.target_counts[key]
+            if current != target:
+                done = False
+                step = 1 if target > current else -1
+                self.counts[key] = current + step
+        self._draw()
+        if not done:
+            self.after(15, self._animate)
+        else:
+            self._animating = False
+
+    def _draw(self):
+        self.delete("all")
+        width = self.winfo_width()
+        height = self.winfo_height()
+        if width <= 1 or height <= 1:
+            return
+
+        total = max(sum(self.counts.values()), 1)
+        chart_height = height - 30
+        bar_width = max(30, int(width / 6))
+        gap = int((width - (bar_width * 3)) / 4)
+        colors = {
+            "ok": ModernStyle.ACCENT_SUCCESS,
+            "setup": ModernStyle.ACCENT_WARNING,
+            "no": ModernStyle.ACCENT_ERROR,
+        }
+
+        for idx, key in enumerate(["ok", "setup", "no"]):
+            x0 = gap + idx * (bar_width + gap)
+            bar_height = int((self.counts[key] / total) * (chart_height - 10))
+            y0 = chart_height - bar_height
+            self.create_rectangle(
+                x0, y0, x0 + bar_width, chart_height,
+                fill=colors[key],
+                outline=""
+            )
+            self.create_text(
+                x0 + bar_width / 2,
+                chart_height + 12,
+                text=key.upper(),
+                fill=ModernStyle.TEXT_SECONDARY,
+                font=ModernStyle.FONT_MAIN
+            )
+            self.create_text(
+                x0 + bar_width / 2,
+                y0 - 8,
+                text=str(self.counts[key]),
+                fill=ModernStyle.TEXT_PRIMARY,
+                font=ModernStyle.FONT_MAIN
+            )
+
+
+class WorkflowDiagram(tk.Canvas):
+    """Workflow diagram with active step highlight."""
+
+    def __init__(self, parent, **kwargs):
+        super().__init__(
+            parent,
+            height=120,
+            bg=ModernStyle.BG_MEDIUM,
+            highlightthickness=0,
+            bd=0,
+            **kwargs
+        )
+        self.steps = [
+            "4H Fetch",
+            "1H Fetch",
+            "15M Fetch",
+            "Analyze",
+            "Score",
+            "Report",
+        ]
+        self.active_index = -1
+        self.bind("<Configure>", lambda _: self._draw())
+
+    def set_stage(self, stage_text: str) -> None:
+        stage = stage_text.lower()
+        mapping = {
+            "fetch 4h": 0,
+            "fetch 1h": 1,
+            "fetch 15m": 2,
+        }
+        idx = None
+        for key, val in mapping.items():
+            if key in stage:
+                idx = val
+                break
+        if idx is None:
+            if "analiz" in stage or "analysis" in stage:
+                idx = 3
+            elif "score" in stage:
+                idx = 4
+            elif "report" in stage or "tamamlandı" in stage:
+                idx = 5
+        if idx is not None:
+            self.active_index = idx
+            self._draw()
+
+    def reset(self) -> None:
+        self.active_index = -1
+        self._draw()
+
+    def _draw(self):
+        self.delete("all")
+        width = self.winfo_width()
+        height = self.winfo_height()
+        if width <= 1 or height <= 1:
+            return
+
+        step_width = int(width / len(self.steps))
+        center_y = height // 2
+
+        for idx, label in enumerate(self.steps):
+            x0 = idx * step_width + 10
+            x1 = (idx + 1) * step_width - 10
+            color = ModernStyle.ACCENT_PRIMARY if idx == self.active_index else ModernStyle.BG_LIGHT
+            text_color = ModernStyle.TEXT_PRIMARY if idx == self.active_index else ModernStyle.TEXT_SECONDARY
+
+            self.create_rectangle(
+                x0, center_y - 16, x1, center_y + 16,
+                fill=color,
+                outline=ModernStyle.BORDER
+            )
+            self.create_text(
+                (x0 + x1) / 2,
+                center_y,
+                text=label,
+                fill=text_color,
+                font=ModernStyle.FONT_MAIN
+            )
+            if idx < len(self.steps) - 1:
+                self.create_line(
+                    x1 + 2,
+                    center_y,
+                    x1 + 12,
+                    center_y,
+                    fill=ModernStyle.TEXT_SECONDARY,
+                    width=2
+                )
+
 class ModernButton(tk.Canvas):
     """Hover effektli custom button"""
     
@@ -493,7 +661,37 @@ class App:
             padding=15
         )
         output_card.pack(fill="both", expand=True, padx=15, pady=(5, 15))
-        
+
+        summary_frame = ttk.Frame(output_card, style="Card.TFrame")
+        summary_frame.pack(fill="x", pady=(0, 10))
+
+        stats_frame = ttk.Frame(summary_frame, style="Card.TFrame")
+        stats_frame.pack(side="left", fill="both", expand=True, padx=(0, 10))
+
+        self.ok_var = tk.StringVar(value="OK: 0")
+        self.setup_var = tk.StringVar(value="SETUP: 0")
+        self.no_var = tk.StringVar(value="NO_TRADE: 0")
+        self.best_var = tk.StringVar(value="Best: -")
+
+        for idx, var in enumerate([self.ok_var, self.setup_var, self.no_var, self.best_var]):
+            card = ttk.Frame(stats_frame, style="Card.TFrame", padding=8)
+            card.grid(row=0, column=idx, padx=5, sticky="ew")
+            ttk.Label(card, textvariable=var, style="Normal.TLabel").pack()
+
+        stats_frame.columnconfigure(0, weight=1)
+        stats_frame.columnconfigure(1, weight=1)
+        stats_frame.columnconfigure(2, weight=1)
+        stats_frame.columnconfigure(3, weight=1)
+
+        visuals_frame = ttk.Frame(summary_frame, style="Card.TFrame")
+        visuals_frame.pack(side="right", fill="x")
+
+        self.summary_chart = SummaryChart(visuals_frame)
+        self.summary_chart.pack(fill="x", pady=(0, 8))
+
+        self.workflow = WorkflowDiagram(visuals_frame)
+        self.workflow.pack(fill="x")
+
         # Text widget with scrollbar
         txt_frame = ttk.Frame(output_card, style="Card.TFrame")
         txt_frame.pack(fill="both", expand=True)
@@ -520,6 +718,9 @@ class App:
     
     def _symbols_count_text(self) -> str:
         s = self.settings.get("symbols", {})
+        if bool(s.get("auto_top_usdtm", False)):
+            limit = int(s.get("top_limit", 200))
+            return f"📊 Simvollar: Binance Top {limit} (USDT-M PERP)"
         if bool(s.get("auto_all_usdtm", False)):
             return "📊 Simvollar: AUTO (bütün USDT-M) — skan zamanı yüklənəcək"
         lst = s.get("list", []) or s.get("default", []) or []
@@ -582,6 +783,8 @@ class App:
         
         self.txt.delete("1.0", "end")
         self.txt.insert("end", "🔄 Skan başlayır...\n\n")
+        self._update_summary({"ok": 0, "setup": 0, "no": 0, "total": 0, "best": None})
+        self.workflow.reset()
         
         self._set_busy(True)
         self._start_spinner()
@@ -597,7 +800,10 @@ class App:
                 settings = load_settings("settings.json")
                 
                 sym_cfg = settings.get("symbols", {})
-                if bool(sym_cfg.get("auto_all_usdtm", False)):
+                if bool(sym_cfg.get("auto_top_usdtm", False)):
+                    limit = int(sym_cfg.get("top_limit", 200))
+                    symbols = binance_data.list_usdtm_perp_symbols_by_volume(limit=limit)
+                elif bool(sym_cfg.get("auto_all_usdtm", False)):
                     symbols = binance_data.list_usdtm_perp_symbols()
                 else:
                     symbols = sym_cfg.get("list", []) or sym_cfg.get("default", []) or []
@@ -625,7 +831,14 @@ class App:
                     on_stage=on_stage,
                 )
                 report = format_report(results, best, settings)
-                self._q.put(("done", report))
+                summary = {
+                    "ok": len([r for r in results if r.status == "OK"]),
+                    "setup": len([r for r in results if r.status == "SETUP"]),
+                    "no": len([r for r in results if r.status == "NO_TRADE"]),
+                    "total": len(results),
+                    "best": best.symbol if best else None,
+                }
+                self._q.put(("done", report, summary))
             except Exception as e:
                 self._q.put(("error", str(e)))
         
@@ -642,15 +855,17 @@ class App:
                     _, i, total, symbol = msg
                     self.status_var.set(f"🔍 {symbol} ({i}/{total})")
                     self.stage_var.set(f"📊 Analiz: {symbol}")
+                    self.workflow.set_stage("analiz")
                     if total > 0:
                         self.progress.configure(maximum=total, value=i)
                 
                 elif kind == "stage":
                     _, text = msg
                     self.stage_var.set(f"⚙️  {text}")
+                    self.workflow.set_stage(text)
                 
                 elif kind == "done":
-                    _, report = msg
+                    _, report, summary = msg
                     self.txt.delete("1.0", "end")
                     self.txt.insert("end", report)
                     self.status_var.set("✓ Tamamlandı")
@@ -658,6 +873,8 @@ class App:
                     self._stop_spinner()
                     self._set_busy(False)
                     self.stage_var.set("✓ Hazır")
+                    self.workflow.set_stage("report")
+                    self._update_summary(summary)
                 
                 elif kind == "error":
                     _, err = msg
@@ -670,3 +887,15 @@ class App:
             pass
         
         self.root.after(120, self._poll_queue)
+
+    def _update_summary(self, summary: dict) -> None:
+        ok = int(summary.get("ok", 0))
+        setup = int(summary.get("setup", 0))
+        no = int(summary.get("no", 0))
+        total = int(summary.get("total", ok + setup + no))
+        best = summary.get("best") or "-"
+        self.ok_var.set(f"OK: {ok}")
+        self.setup_var.set(f"SETUP: {setup}")
+        self.no_var.set(f"NO_TRADE: {no}")
+        self.best_var.set(f"Best: {best} / {total}")
+        self.summary_chart.set_counts(ok, setup, no)
