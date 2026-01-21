@@ -136,7 +136,9 @@
     "w_confluence": 3.0,
     "w_confluence_count": 1.0,
     "w_confirmation": 2.0,
-    "w_micro_confirmation": 1.5
+    "w_micro_confirmation": 1.5,
+    "w_alignment": 2.0,
+    "w_entry_distance": 1.0
   },
   "scan": {
     "limit_15m": 500

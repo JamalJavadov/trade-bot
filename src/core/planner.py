@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
@@ -97,6 +98,8 @@ def load_settings(path: str) -> Dict[str, Any]:
                 "w_confluence_count": 1.0,
                 "w_confirmation": 2.0,
                 "w_micro_confirmation": 1.5,
+                "w_alignment": 2.0,
+                "w_entry_distance": 1.0,
             },
         }
     return json.loads(p.read_text(encoding="utf-8"))
@@ -140,9 +143,17 @@ def _calc_qty(symbol: str, entry: float, sl: float, budget_usdt: float, risk_pct
 
 def _fit_probability(score: float, max_score: float) -> float:
     if max_score <= 0:
-        return 0.0
+        return 50.0
     pct = (score / max_score) * 100.0
-    return float(max(0.0, min(100.0, pct)))
+    return float(max(5.0, min(95.0, pct)))
+
+
+def _fit_probability_distribution(score: float, mean_score: float, std_score: float) -> float:
+    if std_score <= 0:
+        return _fit_probability(score, max_score=mean_score if mean_score > 0 else 1.0)
+    z = (score - mean_score) / std_score
+    sigmoid = 1.0 / (1.0 + math.exp(-z))
+    return float(max(5.0, min(95.0, sigmoid * 100.0)))
 
 
 def run_scan_and_build_best_plan(
@@ -238,12 +249,14 @@ def run_scan_and_build_best_plan(
 
     scored = [r.score for r in results]
     max_score = max(scored) if scored else 0.0
+    mean_score = (sum(scored) / len(scored)) if scored else 0.0
+    std_score = math.sqrt(sum((s - mean_score) ** 2 for s in scored) / len(scored)) if scored else 0.0
     for r in results:
-        r.probability = _fit_probability(r.score, max_score)
+        r.probability = _fit_probability_distribution(r.score, mean_score, std_score)
     if best_ok:
-        best_ok.probability = _fit_probability(best_ok.score, max_score)
+        best_ok.probability = _fit_probability_distribution(best_ok.score, mean_score, std_score)
     if best_setup:
-        best_setup.probability = _fit_probability(best_setup.score, max_score)
+        best_setup.probability = _fit_probability_distribution(best_setup.score, mean_score, std_score)
 
     prefer_ok = bool(settings.get("strategy", {}).get("best_requires_ok", False))
     if prefer_ok and best_ok:
