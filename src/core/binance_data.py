@@ -62,20 +62,20 @@ def list_usdtm_perp_symbols() -> List[str]:
 
 
 def list_usdtm_perp_symbols_by_volume(limit: int = 200) -> List[str]:
+    info = futures_exchange_info()
+    valid_symbols = {
+        s.get("symbol")
+        for s in info.get("symbols", [])
+        if s.get("status") == "TRADING"
+        and s.get("quoteAsset") == "USDT"
+        and s.get("contractType") == "PERPETUAL"
+    }
+
     tickers = client.futures_ticker()
     volumes = {}
     for t in tickers:
         symbol = t.get("symbol")
-        if not symbol:
-            continue
-        meta = _symbol_meta(symbol)
-        if not meta:
-            continue
-        if (
-            meta.get("status") != "TRADING"
-            or meta.get("quoteAsset") != "USDT"
-            or meta.get("contractType") != "PERPETUAL"
-        ):
+        if not symbol or symbol not in valid_symbols:
             continue
         try:
             volumes[symbol] = float(t.get("quoteVolume", 0.0))
