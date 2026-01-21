@@ -100,6 +100,11 @@ def load_settings(path: str) -> Dict[str, Any]:
                 "w_micro_confirmation": 1.5,
                 "w_alignment": 2.0,
                 "w_entry_distance": 1.0,
+                "w_zone": 2.0,
+                "w_status": 2.0,
+                "rr2_target": 6.0,
+                "confluence_target": 3,
+                "min_setup_quality_pct": 55.0,
             },
         }
     return json.loads(p.read_text(encoding="utf-8"))
@@ -247,16 +252,35 @@ def run_scan_and_build_best_plan(
         except Exception as e:
             results.append(ScanResult(sym, "NO_TRADE", "-", 0.0, 0.0, 0.0, f"ERROR: {e}"))
 
-    scored = [r.score for r in results]
+    scored = [r.score for r in results if r.status in ("OK", "SETUP")]
+    if not scored:
+        scored = [r.score for r in results]
     max_score = max(scored) if scored else 0.0
+    min_score = min(scored) if scored else 0.0
     mean_score = (sum(scored) / len(scored)) if scored else 0.0
     std_score = math.sqrt(sum((s - mean_score) ** 2 for s in scored) / len(scored)) if scored else 0.0
+
+    def _range_probability(score: float) -> float:
+        if max_score <= min_score:
+            return 50.0
+        pct = (score - min_score) / (max_score - min_score)
+        return float(max(5.0, min(95.0, pct * 100.0)))
+
+    def _blend_probability(score: float) -> float:
+        dist_prob = _fit_probability_distribution(score, mean_score, std_score)
+        range_prob = _range_probability(score)
+        blended = (dist_prob * 0.6) + (range_prob * 0.4)
+        return float(max(5.0, min(95.0, blended)))
+
     for r in results:
-        r.probability = _fit_probability_distribution(r.score, mean_score, std_score)
+        if r.status in ("OK", "SETUP"):
+            r.probability = _blend_probability(r.score)
+        else:
+            r.probability = 5.0
     if best_ok:
-        best_ok.probability = _fit_probability_distribution(best_ok.score, mean_score, std_score)
+        best_ok.probability = _blend_probability(best_ok.score)
     if best_setup:
-        best_setup.probability = _fit_probability_distribution(best_setup.score, mean_score, std_score)
+        best_setup.probability = _blend_probability(best_setup.score)
 
     prefer_ok = bool(settings.get("strategy", {}).get("best_requires_ok", False))
     if prefer_ok and best_ok:

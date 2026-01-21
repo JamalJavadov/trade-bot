@@ -38,6 +38,10 @@ def _atr(df: pd.DataFrame, period: int = 14) -> float:
     return float(pd.Series(tr).rolling(period).mean().iloc[-1])
 
 
+def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
+    return max(low, min(high, value))
+
+
 def _fractals_5(df: pd.DataFrame) -> Tuple[List[int], List[int]]:
     highs = df["high"].to_numpy()
     lows = df["low"].to_numpy()
@@ -620,6 +624,8 @@ def _build_measurement_setup(
         details={
             "entry_zone_low": float(zone_low),
             "entry_zone_high": float(zone_high),
+            "in_zone": True,
+            "dist_to_zone_atr": 0.0,
             "fvg_overlap": bool(fvg_overlap),
             "confluence_count": int(1 if fvg_overlap else 0),
             "atr": float(atr),
@@ -851,37 +857,82 @@ def analyze_symbol(
     w_micro_confirmation = float(scoring_cfg.get("w_micro_confirmation", 1.5))
     w_alignment = float(scoring_cfg.get("w_alignment", 2.0))
     w_entry_distance = float(scoring_cfg.get("w_entry_distance", 1.0))
+    w_zone = float(scoring_cfg.get("w_zone", 2.0))
+    w_status = float(scoring_cfg.get("w_status", 2.0))
+    rr2_target = float(scoring_cfg.get("rr2_target", 6.0))
+    confluence_target = int(scoring_cfg.get("confluence_target", 3))
+    min_setup_quality_pct = float(scoring_cfg.get("min_setup_quality_pct", 55.0))
 
-    trend_bonus = 1.0 if best.side == ema_bias else 0.5
-    conf_bonus = 1.0 if "(" in best.reason else 0.0
-    if best.details and best.details.get("fallback"):
-        conf_bonus = 0.0
+    trend_score = 0.0
+    if best.side == ema_bias:
+        trend_score = 1.0
+    elif ema_bias in ("RANGE", None):
+        trend_score = 0.5
+
     confluence_count = 0
-    confirmation_bonus = 0.0
-    micro_confirmation_bonus = 1.0 if micro_confirmation else 0.0
+    confirmation_score = 0.0
+    micro_confirmation_score = 1.0 if micro_confirmation else 0.0
     if best.details:
         confluence_count = int(best.details.get("confluence_count", 0))
         if best.details.get("confirmation"):
-            confirmation_bonus = 1.0
+            confirmation_score = 1.0
         elif best.details.get("fvg_overlap"):
-            confirmation_bonus = 0.5
+            confirmation_score = 0.5
 
     alignment_ratio = max(float(ema_ratio), float(pd_ratio))
     alignment_score = 0.0
     if htf_min_alignment < 1.0:
         alignment_score = max(0.0, min(1.0, (alignment_ratio - htf_min_alignment) / (1.0 - htf_min_alignment)))
     entry_distance_score = 1.0 - min(1.0, dist_atr / max_entry_atr) if max_entry_atr > 0 else 0.0
+    rr2_score = _clamp((best.rr2 - min_rr2) / (rr2_target - min_rr2)) if rr2_target > min_rr2 else _clamp(best.rr2 / max(min_rr2, 1e-6))
+    min_conf = int(strategy_cfg.get("min_confluence", 1))
+    confluence_presence = 1.0 if confluence_count >= min_conf else 0.5 if confluence_count > 0 else 0.0
+    confluence_score = _clamp(confluence_count / max(1, confluence_target))
+    status_score = 1.0 if best.status == "OK" else 0.6
 
-    best.score = (
-        best.rr2 * w_rr2
-        + trend_bonus * w_trend
-        + conf_bonus * w_conf
-        + confluence_count * w_conf_count
-        + confirmation_bonus * w_confirmation
-        + micro_confirmation_bonus * w_micro_confirmation
+    zone_score = 0.0
+    dist_to_zone_atr = None
+    in_zone = False
+    if best.details:
+        in_zone = bool(best.details.get("in_zone", False))
+        dist_to_zone_atr = best.details.get("dist_to_zone_atr")
+    if in_zone:
+        zone_score = 1.0
+    elif dist_to_zone_atr is not None:
+        max_pre_zone_atr = float(strategy_cfg.get("max_pre_zone_atr", 1.5))
+        if max_pre_zone_atr > 0:
+            zone_score = _clamp(1.0 - (float(dist_to_zone_atr) / max_pre_zone_atr))
+
+    total_weight = (
+        w_rr2
+        + w_trend
+        + w_conf
+        + w_conf_count
+        + w_confirmation
+        + w_micro_confirmation
+        + w_alignment
+        + w_entry_distance
+        + w_zone
+        + w_status
+    )
+    weighted_sum = (
+        rr2_score * w_rr2
+        + trend_score * w_trend
+        + confluence_presence * w_conf
+        + confluence_score * w_conf_count
+        + confirmation_score * w_confirmation
+        + micro_confirmation_score * w_micro_confirmation
         + alignment_score * w_alignment
         + entry_distance_score * w_entry_distance
-    ) * penalty
+        + zone_score * w_zone
+        + status_score * w_status
+    )
+    quality_score = 0.0
+    if total_weight > 0:
+        quality_score = (weighted_sum / total_weight) * 100.0
+    quality_score *= penalty
+
+    best.score = float(quality_score)
     if best.details is not None:
         best.details = {
             **best.details,
@@ -892,6 +943,12 @@ def analyze_symbol(
                 "min_rr2": min_rr2,
                 "max_entry_distance_atr": max_entry_atr,
                 "penalty_multiplier": penalty,
+            },
+            "score_meta": {
+                "rr2_target": rr2_target,
+                "confluence_target": confluence_target,
+                "min_setup_quality_pct": min_setup_quality_pct,
+                "weight_total": total_weight,
             },
             "htf_bias_timeframes": htf_timeframes,
             "htf_bias_alignment_min": htf_min_alignment,
@@ -908,15 +965,60 @@ def analyze_symbol(
             "micro_confirmation": bool(micro_confirmation),
             "micro_confirmation_pattern": micro_pattern,
             "score_components": {
-                "rr2": best.rr2 * w_rr2,
-                "trend": trend_bonus * w_trend,
-                "confluence": conf_bonus * w_conf,
-                "confluence_count": confluence_count * w_conf_count,
-                "confirmation": confirmation_bonus * w_confirmation,
-                "micro_confirmation": micro_confirmation_bonus * w_micro_confirmation,
-                "alignment": alignment_score * w_alignment,
-                "entry_distance": entry_distance_score * w_entry_distance,
+                "rr2": {
+                    "raw": float(best.rr2),
+                    "normalized": rr2_score,
+                    "weighted": rr2_score * w_rr2,
+                },
+                "trend": {
+                    "raw": best.side,
+                    "normalized": trend_score,
+                    "weighted": trend_score * w_trend,
+                },
+                "confluence_presence": {
+                    "raw": confluence_count,
+                    "normalized": confluence_presence,
+                    "weighted": confluence_presence * w_conf,
+                },
+                "confluence_count": {
+                    "raw": confluence_count,
+                    "normalized": confluence_score,
+                    "weighted": confluence_score * w_conf_count,
+                },
+                "confirmation": {
+                    "normalized": confirmation_score,
+                    "weighted": confirmation_score * w_confirmation,
+                },
+                "micro_confirmation": {
+                    "normalized": micro_confirmation_score,
+                    "weighted": micro_confirmation_score * w_micro_confirmation,
+                },
+                "alignment": {
+                    "raw": alignment_ratio,
+                    "normalized": alignment_score,
+                    "weighted": alignment_score * w_alignment,
+                },
+                "entry_distance": {
+                    "raw": dist_atr,
+                    "normalized": entry_distance_score,
+                    "weighted": entry_distance_score * w_entry_distance,
+                },
+                "zone_proximity": {
+                    "normalized": zone_score,
+                    "weighted": zone_score * w_zone,
+                },
+                "status": {
+                    "raw": best.status,
+                    "normalized": status_score,
+                    "weighted": status_score * w_status,
+                },
+                "quality_pct": float(quality_score),
             },
         }
+
+    if best.status == "SETUP" and quality_score < min_setup_quality_pct:
+        best.status = "NO_TRADE"
+        best.side = "-"
+        best.reason = f"Setup keyfiyyəti {quality_score:.1f}% < tələb olunan {min_setup_quality_pct:.1f}%"
 
     return best
