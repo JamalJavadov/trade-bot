@@ -710,6 +710,8 @@ def _build_fallback_setup(
         details={
             "fallback": True,
             "atr": float(atr),
+            "in_zone": False,
+            "dist_to_zone_atr": None,
         },
     )
 
@@ -816,7 +818,10 @@ def analyze_symbol(
                 candidates.append(measurement)
 
     eligible = [c for c in candidates if c.rr2 >= min_rr2]
-    if not eligible:
+    best: Optional[Analysis] = None
+    if eligible:
+        best = max(eligible, key=lambda x: x.score)
+    else:
         fallback_side = _fallback_bias(ema_bias, pd_bias, df_impulse)
         if fallback_side:
             fallback = _build_fallback_setup(df_impulse, fallback_side, atr1, min_rr2, strategy_cfg)
@@ -830,14 +835,13 @@ def analyze_symbol(
                         "confirm_timeframe": confirm_tf,
                         "measurement_timeframe": measurement_tf,
                     }
-                return fallback
-        return Analysis(
-            status="NO_TRADE",
-            side="-",
-            reason=f"RR hədəfi {min_rr2:.2f} qarşılanmadı (3x1 qaydası)",
-        )
-
-    best = max(eligible, key=lambda x: x.score)
+                best = fallback
+        if best is None:
+            return Analysis(
+                status="NO_TRADE",
+                side="-",
+                reason=f"RR hədəfi {min_rr2:.2f} qarşılanmadı (3x1 qaydası)",
+            )
 
     last_close = float(df_impulse["close"].iloc[-1])
     dist_atr = abs(last_close - best.entry) / atr1
