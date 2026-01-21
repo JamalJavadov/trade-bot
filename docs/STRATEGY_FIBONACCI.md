@@ -9,9 +9,10 @@
 
 ## 2) Chart Setup & Tools
 **Timeframes**
-1. **4H** – higher-timeframe bias (trend + premium/discount).
-2. **1H** – main impulse leg selection + golden zone setup.
-3. **15M** – confirmation + measurement strategy with BOS/FVG.
+1. **HTF Bias Stack (default: 1D + 4H)** – trend and premium/discount alignment across multiple higher timeframes.
+2. **Impulse TF (default: 1H)** – main impulse leg selection + golden zone setup.
+3. **Confirm TF (default: 15M)** – confirmation signals (engulfing, star, rejection).
+4. **Measurement TF (default: 15M)** – BOS/FVG measurement setups (can differ from confirm TF).
 
 **Indicators / Tools**
 - Fibonacci Retracement (standard levels).
@@ -19,6 +20,9 @@
 - Anchored VWAP (from impulse start).
 - Fractals (5-period) to locate swing highs/lows.
 - Optional: Fib Time Zones (timing confluence, optional).
+
+**HTF Alignment Rule**
+- The bot takes the **majority bias** across HTF timeframes. If the alignment ratio is below the configured threshold, it stands aside.
 
 ## 3) Fibonacci Settings
 Use the following retracement levels:
@@ -118,6 +122,11 @@ Key settings in `settings.json`:
 - `strategy.min_confluence`
 - `strategy.zone_tolerance_atr`
 - `strategy.allow_pre_zone`
+- `strategy.htf_bias_timeframes`
+- `strategy.htf_min_alignment`
+- `strategy.impulse_timeframe`
+- `strategy.confirm_timeframe`
+- `strategy.measurement_timeframe`
 - `risk.min_rr2`
 - `risk.max_entry_distance_atr`
 - `scoring.w_confluence_count`

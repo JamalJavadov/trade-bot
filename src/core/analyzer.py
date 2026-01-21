@@ -80,6 +80,23 @@ def _premium_discount_bias(df4: pd.DataFrame, lookback: int) -> Optional[str]:
     return None
 
 
+def _aggregate_bias(biases: Dict[str, Optional[str]], min_alignment: float) -> Tuple[Optional[str], Dict[str, int], float]:
+    counts = {"LONG": 0, "SHORT": 0}
+    for bias in biases.values():
+        if bias in counts:
+            counts[bias] += 1
+    total = counts["LONG"] + counts["SHORT"]
+    if total == 0:
+        return None, counts, 0.0
+    if counts["LONG"] == counts["SHORT"]:
+        return None, counts, 0.0
+    best = "LONG" if counts["LONG"] > counts["SHORT"] else "SHORT"
+    ratio = counts[best] / total
+    if ratio < min_alignment:
+        return None, counts, ratio
+    return best, counts, ratio
+
+
 def _select_impulse_leg(df: pd.DataFrame, side: str, lookback: int) -> Optional[Tuple[int, int, float, float]]:
     d = df.tail(lookback)
     if len(d) < 50:
@@ -571,9 +588,10 @@ def analyze_symbol(
     on_stage: Optional[Callable[[str], None]] = None,
 ) -> Analysis:
     scan_cfg = settings.get("scan", {})
-    limit4 = int(scan_cfg.get("limit_4h", 500))
-    limit1 = int(scan_cfg.get("limit_1h", 500))
-    limit15 = int(scan_cfg.get("limit_15m", 500))
+    timeframes_cfg = settings.get("timeframes", {})
+
+    def _limit_for(tf: str, fallback: int = 500) -> int:
+        return int(timeframes_cfg.get(tf, {}).get("limit", scan_cfg.get(f"limit_{tf}", fallback)))
 
     risk_cfg = settings.get("risk", {})
     min_rr2 = float(risk_cfg.get("min_rr2", 2.0))
@@ -581,38 +599,55 @@ def analyze_symbol(
 
     strategy_cfg = settings.get("strategy", {})
     htf_lookback = int(strategy_cfg.get("htf_range_lookback", 200))
+    htf_timeframes = strategy_cfg.get("htf_bias_timeframes", ["1d", "4h"])
+    if isinstance(htf_timeframes, str):
+        htf_timeframes = [htf_timeframes]
+    if not htf_timeframes:
+        htf_timeframes = ["1d", "4h"]
+    htf_min_alignment = float(strategy_cfg.get("htf_min_alignment", 0.6))
+    impulse_tf = strategy_cfg.get("impulse_timeframe", "1h")
+    confirm_tf = strategy_cfg.get("confirm_timeframe", "15m")
+    measurement_tf = strategy_cfg.get("measurement_timeframe", confirm_tf)
 
-    if on_stage:
-        on_stage("fetch 4H")
-    df4 = fetch_ohlcv(symbol, "4h", limit4)
+    tf_cache: Dict[str, pd.DataFrame] = {}
 
-    ema_bias = _trend_bias_ema(df4)
-    pd_bias = _premium_discount_bias(df4, htf_lookback)
+    def _fetch_tf(tf: str) -> pd.DataFrame:
+        if tf not in tf_cache:
+            if on_stage:
+                on_stage(f"fetch {tf.upper()}")
+            tf_cache[tf] = fetch_ohlcv(symbol, tf, _limit_for(tf))
+        return tf_cache[tf]
 
-    if ema_bias == "RANGE" and not pd_bias:
+    ema_biases: Dict[str, Optional[str]] = {}
+    pd_biases: Dict[str, Optional[str]] = {}
+    for tf in htf_timeframes:
+        df_htf = _fetch_tf(tf)
+        ema_biases[tf] = _trend_bias_ema(df_htf)
+        pd_biases[tf] = _premium_discount_bias(df_htf, htf_lookback)
+
+    ema_bias, ema_counts, ema_ratio = _aggregate_bias(ema_biases, htf_min_alignment)
+    pd_bias, pd_counts, pd_ratio = _aggregate_bias(pd_biases, htf_min_alignment)
+
+    if not ema_bias and not pd_bias:
         return Analysis(status="NO_TRADE", side="-", reason="HTF bias yoxdur (EMA və Premium/Discount)\n")
 
-    if on_stage:
-        on_stage("fetch 1H")
-    df1 = fetch_ohlcv(symbol, "1h", limit1)
+    df_impulse = _fetch_tf(impulse_tf)
+    df_confirm = _fetch_tf(confirm_tf)
+    df_measure = _fetch_tf(measurement_tf)
 
-    if on_stage:
-        on_stage("fetch 15M")
-    df15 = fetch_ohlcv(symbol, "15m", limit15)
-
-    atr1 = _atr(df1, 14)
+    atr1 = _atr(df_impulse, 14)
     if not np.isfinite(atr1) or atr1 <= 0:
         return Analysis(status="NO_TRADE", side="-", reason="ATR hesablanmadı")
 
     candidates: List[Analysis] = []
 
     if ema_bias in ("LONG", "SHORT"):
-        golden = _build_golden_zone_setup(df1, df15, ema_bias, atr1, strategy_cfg)
+        golden = _build_golden_zone_setup(df_impulse, df_confirm, ema_bias, atr1, strategy_cfg)
         if golden:
             candidates.append(golden)
 
     if pd_bias in ("LONG", "SHORT"):
-        measurement = _build_measurement_setup(df15, pd_bias, atr1, strategy_cfg)
+        measurement = _build_measurement_setup(df_measure, pd_bias, atr1, strategy_cfg)
         if measurement:
             candidates.append(measurement)
 
@@ -621,7 +656,7 @@ def analyze_symbol(
 
     best = max(candidates, key=lambda x: x.score)
 
-    dist_atr = abs(float(df1["close"].iloc[-1]) - best.entry) / atr1
+    dist_atr = abs(float(df_impulse["close"].iloc[-1]) - best.entry) / atr1
     if dist_atr > max_entry_atr:
         return Analysis(status="NO_TRADE", side="-", reason=f"Entry çox uzaqdır (dist={dist_atr:.2f} ATR)")
 
@@ -659,6 +694,17 @@ def analyze_symbol(
             "ema_bias": ema_bias,
             "premium_discount_bias": pd_bias,
             "entry_distance_atr": float(dist_atr),
+            "htf_bias_timeframes": htf_timeframes,
+            "htf_bias_alignment_min": htf_min_alignment,
+            "htf_bias_ema_votes": ema_biases,
+            "htf_bias_pd_votes": pd_biases,
+            "htf_bias_ema_counts": ema_counts,
+            "htf_bias_pd_counts": pd_counts,
+            "htf_bias_ema_ratio": float(ema_ratio),
+            "htf_bias_pd_ratio": float(pd_ratio),
+            "impulse_timeframe": impulse_tf,
+            "confirm_timeframe": confirm_tf,
+            "measurement_timeframe": measurement_tf,
             "score_components": {
                 "rr2": best.rr2 * w_rr2,
                 "trend": trend_bonus * w_trend,
