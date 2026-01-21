@@ -1,0 +1,131 @@
+{
+  "mode": "FUTURES_USDTM",
+  "timeframes": {
+    "4h": {
+      "limit": 500
+    },
+    "1h": {
+      "limit": 500
+    },
+    "15m": {
+      "limit": 500
+    },
+    "5m": {
+      "limit": 500
+    }
+  },
+  "symbols": {
+    "default": [
+      "BTCUSDT",
+      "ETHUSDT",
+      "BNBUSDT",
+      "XRPUSDT",
+      "SOLUSDT",
+      "TRXUSDT",
+      "DOGEUSDT",
+      "ADAUSDT",
+      "WBTCUSDT",
+      "BCHUSDT",
+      "XMRUSDT",
+      "LINKUSDT",
+      "LEOUSDT",
+      "HYPEUSDT",
+      "XLMUSDT",
+      "OKBUSDT",
+      "SUIUSDT",
+      "LTCUSDT",
+      "AVAXUSDT",
+      "SHIBUSDT",
+      "HBARUSDT",
+      "TONUSDT",
+      "UNIUSDT",
+      "DOTUSDT",
+      "MNTUSDT",
+      "CROUSDT",
+      "AAVEUSDT",
+      "TAOUSDT",
+      "PIUSDT",
+      "POLUSDT",
+      "KCSUSDT",
+      "BGBUSDT",
+      "ENAUSDT",
+      "ZECUSDT",
+      "EVAUSDT",
+      "USDSUSDT",
+      "USDEUSDT",
+      "XAUTUSDT",
+      "PAXGUSDT",
+      "GTUSDT",
+      "MSOLUSDT",
+      "MYXUSDT",
+      "NEXOUSDT",
+      "STXUSDT",
+      "CHZUSDT",
+      "VETUSDT",
+      "FILUSDT",
+      "ATOMUSDT",
+      "ONDOUSDT",
+      "RENDERUSDT",
+      "APTUSDT",
+      "DASHUSDT",
+      "ALGOUSDT",
+      "WWBUSDT",
+      "TRUMPUSDT",
+      "QNUSDT",
+      "ARBUSDT",
+      "INJUSDT",
+      "ZROUSDT",
+      "LDOUSDT",
+      "SPXUSDT",
+      "ETHFIUSDT",
+      "AEROUSDT",
+      "FLOKIUSDT",
+      "TIAUSDT",
+      "STRKUSDT",
+      "UUSDUSDT",
+      "CRVUSDT",
+      "IMXUSDT",
+      "TUSDUSDT",
+      "MORPHOUSDT",
+      "PYUSDUSDT",
+      "WLDUSDT",
+      "XNOUSDT",
+      "IPUSDT",
+      "BONKUSDT",
+      "FLRUSDT",
+      "CMETHUSDT",
+      "XDCUSDT",
+      "USDFUSDT",
+      "BNSOLUSDT",
+      "LSETHUSDT",
+      "KASUSDT",
+      "PIUSDT2",
+      "JLPUSDT",
+      "BGBUSDT2",
+      "USDTUSDT",
+      "WBETHUSDT",
+      "WEETHUSDT",
+      "USDT0USDT"
+    ],
+    "remember_last": true
+  },
+  "budget": {
+    "default_usdt": 5.0
+  },
+  "risk": {
+    "risk_pct": 0.1,
+    "leverage": 3,
+    "max_orders_expiry_days": 7,
+    "sl_atr_mult": 1.2,
+    "tp_split": [
+      0.5,
+      0.5
+    ],
+    "min_rr2": 2.0
+  },
+  "scoring": {
+    "w_rr2": 10.0,
+    "w_trend": 5.0,
+    "w_confluence": 3.0
+  }
+}

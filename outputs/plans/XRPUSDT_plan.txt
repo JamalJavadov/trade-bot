@@ -1,0 +1,35 @@
+Scan başlayır...
+
+=== Scan Summary ===
+BTCUSDT: NO TRADE
+ETHUSDT: OK | SHORT | RR2=3.71 | score=36.92
+ADAUSDT: OK | SHORT | RR2=8.84 | score=88.29
+AVAXUSDT: OK | SHORT | RR2=2.16 | score=21.54
+XRPUSDT: OK | SHORT | RR2=13.32 | score=132.93
+
+=== BEST PLAN ===
+XRPUSDT | SHORT
+Entry=2.022000 SL=2.035140 TP1=1.951700 TP2=1.847000
+RR1=5.35 RR2=13.32
+Səbəb: 4H trend SHORT; 1H swing-high zonası; SL=ATR buffer; TP=prior swing lows
+
+=== BINANCE FUTURES FORM (manual doldurma) ===
+Market: XRPUSDT
+Margin: Isolated
+Leverage: 3x
+
+Tab: Limit
+Price (Entry): 2.022
+Size (Qty): 7.4
+TP/SL: ON
+  Take Profit: 1.847   Trigger: Mark
+  Stop Loss:   2.0351   Trigger: Mark
+Reduce-Only: OFF (entry açırsan)
+TIF: GTC
+Action: Sell/Short
+
+Expiry: 7 gün (trigger olmazsa cancel)
+Risk target: 0.5000 USDT | Risk actual: 0.0969 USDT
+[QEYD] Notional cap tətbiq olundu.
+
+
