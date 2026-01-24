@@ -143,9 +143,19 @@
     "w_zone": 2.0,
     "w_zone_balance": 1.0,
     "w_status": 2.0,
+    "w_momentum": 2.0,
+    "w_volume": 1.5,
+    "w_volatility": 1.5,
+    "w_liquidity": 1.0,
     "rr2_target": 6.0,
     "confluence_target": 3,
-    "min_setup_quality_pct": 55.0
+    "min_setup_quality_pct": 55.0,
+    "rsi_period": 14,
+    "volume_lookback": 30,
+    "volume_ratio_min": 0.6,
+    "volume_ratio_max": 2.0,
+    "volatility_lookback": 120,
+    "volatility_target_pctile": 0.6
   },
   "scan": {
     "limit_15m": 500
