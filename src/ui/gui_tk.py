@@ -669,8 +669,8 @@ class App:
         self.root.configure(bg=ModernStyle.BG_DARK)
         
         # Window konfiqurasiyası
-        self.root.geometry("980x760")
-        self.root.minsize(900, 680)
+        self.root.geometry("1200x880")
+        self.root.minsize(1040, 760)
         
         # Queue və thread
         self._q: queue.Queue = queue.Queue()
@@ -1167,29 +1167,8 @@ class App:
         content_container = ttk.Frame(output_card, style="Card.TFrame")
         content_container.pack(fill="both", expand=True)
 
-        canvas = tk.Canvas(
-            content_container,
-            bg=ModernStyle.BG_DARK,
-            highlightthickness=0,
-            bd=0,
-        )
-        scrollbar = ttk.Scrollbar(content_container, orient="vertical", command=canvas.yview)
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        scrollbar.pack(side="right", fill="y")
-        canvas.pack(side="left", fill="both", expand=True)
-
-        content_frame = ttk.Frame(canvas, style="Card.TFrame")
-        content_window = canvas.create_window((0, 0), window=content_frame, anchor="nw")
-
-        def on_frame_configure(event):
-            canvas.configure(scrollregion=canvas.bbox("all"))
-
-        def on_canvas_configure(event):
-            canvas.itemconfigure(content_window, width=event.width)
-
-        content_frame.bind("<Configure>", on_frame_configure)
-        canvas.bind("<Configure>", on_canvas_configure)
+        content_frame = ttk.Frame(content_container, style="Card.TFrame")
+        content_frame.pack(fill="both", expand=True)
 
         summary_frame = ttk.Frame(content_frame, style="Card.TFrame")
         summary_frame.pack(fill="x", pady=(0, 10))
@@ -1548,6 +1527,7 @@ class App:
             spacing3=4,
             yscrollcommand=scrollbar.set
         )
+        self.txt.configure(height=16)
         self.txt.pack(side="left", fill="both", expand=True)
         scrollbar.config(command=self.txt.yview)
 
