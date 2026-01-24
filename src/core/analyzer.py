@@ -26,6 +26,17 @@ def _ema(s: pd.Series, span: int) -> pd.Series:
     return s.ewm(span=span, adjust=False).mean()
 
 
+def _rsi(series: pd.Series, period: int = 14) -> float:
+    if len(series) < period + 1:
+        return float("nan")
+    delta = series.diff()
+    gain = delta.clip(lower=0).rolling(period).mean()
+    loss = (-delta.clip(upper=0)).rolling(period).mean()
+    rs = gain / loss.replace(0.0, np.nan)
+    rsi = 100 - (100 / (1 + rs))
+    return float(rsi.iloc[-1])
+
+
 def _atr(df: pd.DataFrame, period: int = 14) -> float:
     h = df["high"].to_numpy()
     l = df["low"].to_numpy()
@@ -36,6 +47,16 @@ def _atr(df: pd.DataFrame, period: int = 14) -> float:
     if len(tr) < period:
         return float("nan")
     return float(pd.Series(tr).rolling(period).mean().iloc[-1])
+
+
+def _atr_series(df: pd.DataFrame, period: int = 14) -> pd.Series:
+    h = df["high"].to_numpy()
+    l = df["low"].to_numpy()
+    c = df["close"].to_numpy()
+    prev_c = np.roll(c, 1)
+    prev_c[0] = c[0]
+    tr = np.maximum(h - l, np.maximum(np.abs(h - prev_c), np.abs(l - prev_c)))
+    return pd.Series(tr).rolling(period).mean()
 
 
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
@@ -222,6 +243,12 @@ def _zone_tolerance(price: float, atr: float, atr_mult: float, pct: float) -> fl
     atr_part = atr * atr_mult if np.isfinite(atr) else 0.0
     pct_part = price * pct
     return max(atr_part, pct_part)
+
+
+def _percentile_rank(series: pd.Series, value: float) -> float:
+    if series.empty or not np.isfinite(value):
+        return 0.0
+    return float((series <= value).mean())
 
 
 def _in_zone(price: float, low: float, high: float, tol: float) -> bool:
@@ -890,9 +917,19 @@ def analyze_symbol(
     w_zone = float(scoring_cfg.get("w_zone", 2.0))
     w_zone_balance = float(scoring_cfg.get("w_zone_balance", 1.0))
     w_status = float(scoring_cfg.get("w_status", 2.0))
+    w_momentum = float(scoring_cfg.get("w_momentum", 2.0))
+    w_volume = float(scoring_cfg.get("w_volume", 1.5))
+    w_volatility = float(scoring_cfg.get("w_volatility", 1.5))
+    w_liquidity = float(scoring_cfg.get("w_liquidity", 1.0))
     rr2_target = float(scoring_cfg.get("rr2_target", 6.0))
     confluence_target = int(scoring_cfg.get("confluence_target", 3))
     min_setup_quality_pct = float(scoring_cfg.get("min_setup_quality_pct", 55.0))
+    rsi_period = int(scoring_cfg.get("rsi_period", 14))
+    volume_lookback = int(scoring_cfg.get("volume_lookback", 30))
+    volume_ratio_min = float(scoring_cfg.get("volume_ratio_min", 0.6))
+    volume_ratio_max = float(scoring_cfg.get("volume_ratio_max", 2.0))
+    volatility_lookback = int(scoring_cfg.get("volatility_lookback", 120))
+    volatility_target_pctile = float(scoring_cfg.get("volatility_target_pctile", 0.6))
 
     trend_score = 0.0
     if best.side == ema_bias:
@@ -952,6 +989,43 @@ def analyze_symbol(
         float(strategy_cfg.get("strong_trend_ema_separation_atr", 0.3)),
     )
 
+    rsi_value = _rsi(df_impulse["close"], rsi_period)
+    if best.side == "LONG":
+        momentum_score = _clamp((rsi_value - 50.0) / 20.0) if np.isfinite(rsi_value) else 0.0
+    else:
+        momentum_score = _clamp((50.0 - rsi_value) / 20.0) if np.isfinite(rsi_value) else 0.0
+
+    volume_score = 0.0
+    volume_ratio = float("nan")
+    if len(df_impulse) >= max(2, volume_lookback):
+        vol_series = df_impulse["volume"].tail(volume_lookback)
+        vol_avg = float(vol_series.mean()) if not vol_series.empty else 0.0
+        last_volume = float(df_impulse["volume"].iloc[-1])
+        if vol_avg > 0:
+            volume_ratio = last_volume / vol_avg
+            volume_score = _clamp((volume_ratio - volume_ratio_min) / max(volume_ratio_max - volume_ratio_min, 1e-6))
+
+    volatility_score = 0.0
+    volatility_pctile = 0.0
+    atr_series = _atr_series(df_impulse, 14)
+    if not atr_series.empty:
+        atr_pct = atr_series / df_impulse["close"].astype(float)
+        window = atr_pct.dropna().tail(volatility_lookback)
+        if not window.empty:
+            last_atr_pct = float(window.iloc[-1])
+            volatility_pctile = _percentile_rank(window, last_atr_pct)
+            scale = max(volatility_target_pctile, 1.0 - volatility_target_pctile, 1e-6)
+            volatility_score = _clamp(1.0 - abs(volatility_pctile - volatility_target_pctile) / scale)
+
+    liquidity_score = 0.0
+    liquidity_pctile = 0.0
+    quote_volume_series = (df_impulse["volume"].astype(float) * df_impulse["close"].astype(float)).dropna()
+    if not quote_volume_series.empty:
+        window = quote_volume_series.tail(volatility_lookback)
+        last_qv = float(window.iloc[-1])
+        liquidity_pctile = _percentile_rank(window, last_qv)
+        liquidity_score = _clamp(liquidity_pctile)
+
     total_weight = (
         w_rr2
         + w_trend
@@ -965,6 +1039,10 @@ def analyze_symbol(
         + w_zone
         + w_zone_balance
         + w_status
+        + w_momentum
+        + w_volume
+        + w_volatility
+        + w_liquidity
     )
     weighted_sum = (
         rr2_score * w_rr2
@@ -979,6 +1057,10 @@ def analyze_symbol(
         + zone_score * w_zone
         + zone_balance_score * w_zone_balance
         + status_score * w_status
+        + momentum_score * w_momentum
+        + volume_score * w_volume
+        + volatility_score * w_volatility
+        + liquidity_score * w_liquidity
     )
     quality_score = 0.0
     if total_weight > 0:
@@ -1001,6 +1083,12 @@ def analyze_symbol(
                 "rr2_target": rr2_target,
                 "confluence_target": confluence_target,
                 "min_setup_quality_pct": min_setup_quality_pct,
+                "rsi_period": rsi_period,
+                "volume_lookback": volume_lookback,
+                "volume_ratio_min": volume_ratio_min,
+                "volume_ratio_max": volume_ratio_max,
+                "volatility_lookback": volatility_lookback,
+                "volatility_target_pctile": volatility_target_pctile,
                 "weight_total": total_weight,
             },
             "htf_bias_timeframes": htf_timeframes,
@@ -1031,6 +1119,26 @@ def analyze_symbol(
                 "trend_strength": {
                     "normalized": trend_strength_score,
                     "weighted": trend_strength_score * w_trend_strength,
+                },
+                "momentum": {
+                    "raw": float(rsi_value) if np.isfinite(rsi_value) else None,
+                    "normalized": momentum_score,
+                    "weighted": momentum_score * w_momentum,
+                },
+                "volume_activity": {
+                    "raw": float(volume_ratio) if np.isfinite(volume_ratio) else None,
+                    "normalized": volume_score,
+                    "weighted": volume_score * w_volume,
+                },
+                "volatility_regime": {
+                    "raw": float(volatility_pctile),
+                    "normalized": volatility_score,
+                    "weighted": volatility_score * w_volatility,
+                },
+                "liquidity": {
+                    "raw": float(liquidity_pctile),
+                    "normalized": liquidity_score,
+                    "weighted": liquidity_score * w_liquidity,
                 },
                 "confluence_presence": {
                     "raw": confluence_count,
