@@ -1671,14 +1671,18 @@ class App:
                 settings = load_settings("settings.json")
                 
                 sym_cfg = settings.get("symbols", {})
-                if bool(sym_cfg.get("auto_top_usdtm", False)):
+                auto_top_usdtm = bool(sym_cfg.get("auto_top_usdtm", False))
+                auto_all_usdtm = bool(sym_cfg.get("auto_all_usdtm", False))
+                if auto_top_usdtm:
                     limit = int(sym_cfg.get("top_limit", 200))
                     symbols = binance_data.list_usdtm_perp_symbols_by_volume(limit=limit)
-                elif bool(sym_cfg.get("auto_all_usdtm", False)):
+                elif auto_all_usdtm:
                     symbols = binance_data.list_usdtm_perp_symbols()
                 else:
                     symbols = sym_cfg.get("list", []) or sym_cfg.get("default", []) or []
                 symbols = [str(x).upper().strip() for x in symbols if str(x).strip()]
+                if (auto_top_usdtm or auto_all_usdtm) and hasattr(binance_data, "is_valid_usdtm_perp"):
+                    symbols = [s for s in symbols if binance_data.is_valid_usdtm_perp(s)]
                 
                 if not symbols:
                     self._q.put(("error", "❌ settings.json-da symbols list boşdur"))
