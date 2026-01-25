@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import time
 import queue
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -678,6 +679,9 @@ class App:
         self._spinning = False
         self._spinner_i = 0
         self._spinner_frames = ["◐", "◓", "◑", "◒"]
+        self._monitor_thread: Optional[threading.Thread] = None
+        self._monitor_event = threading.Event()
+        self._monitoring = False
         
         # Settings
         self.settings = load_settings("settings.json")
@@ -1333,6 +1337,17 @@ class App:
         self.pending_order_expiry_var = tk.StringVar(value=f"{expiry_days} gün")
         self.pending_order_notional_var = tk.StringVar(value="-")
         self.pending_order_status_var = tk.StringVar(value="-")
+        self.monitor_symbol_var = tk.StringVar(value="")
+        self.monitor_interval_var = tk.IntVar(value=5)
+        self.monitor_status_var = tk.StringVar(value="Monitor gözləmədədir.")
+        self.monitor_signal_var = tk.StringVar(value="-")
+        self.monitor_side_var = tk.StringVar(value="-")
+        self.monitor_entry_var = tk.StringVar(value="-")
+        self.monitor_mark_var = tk.StringVar(value="-")
+        self.monitor_pnl_var = tk.StringVar(value="-")
+        self.monitor_roi_var = tk.StringVar(value="-")
+        self.monitor_leverage_var = tk.StringVar(value="-")
+        self.monitor_liq_var = tk.StringVar(value="-")
 
         best_grid = ttk.Frame(best_frame, style="Card.TFrame")
         best_grid.pack(fill="x")
@@ -1494,6 +1509,135 @@ class App:
 
         for col in range(6):
             pending_grid.columnconfigure(col, weight=1)
+
+        monitor_frame = ttk.LabelFrame(
+            best_frame,
+            text="🛰️ Trade Monitor (Order & Position nəzarəti)",
+            style="Card.TLabelframe",
+            padding=10,
+        )
+        monitor_frame.pack(fill="x", pady=(10, 0))
+
+        monitor_controls = ttk.Frame(monitor_frame, style="Card.TFrame")
+        monitor_controls.pack(fill="x", pady=(0, 6))
+
+        ttk.Label(
+            monitor_controls,
+            text="Market/Symbol:",
+            style="Secondary.TLabel",
+        ).grid(row=0, column=0, sticky="w", padx=(0, 6))
+
+        ttk.Entry(
+            monitor_controls,
+            textvariable=self.monitor_symbol_var,
+            width=12,
+            style="Modern.TEntry",
+            font=ModernStyle.FONT_MAIN,
+        ).grid(row=0, column=1, sticky="w", padx=(0, 12))
+
+        ttk.Label(
+            monitor_controls,
+            text="Refresh (s):",
+            style="Secondary.TLabel",
+        ).grid(row=0, column=2, sticky="w", padx=(0, 6))
+
+        ttk.Spinbox(
+            monitor_controls,
+            from_=2,
+            to=60,
+            textvariable=self.monitor_interval_var,
+            width=6,
+            style="Modern.TSpinbox",
+            font=ModernStyle.FONT_MAIN,
+        ).grid(row=0, column=3, sticky="w", padx=(0, 12))
+
+        ModernButton(
+            monitor_controls,
+            text="🧲 Best-ə tətbiq et",
+            command=self._apply_best_to_monitor,
+            width=160,
+        ).grid(row=0, column=4, sticky="w", padx=(0, 8))
+
+        self.btn_monitor_start = ModernButton(
+            monitor_controls,
+            text="▶️ Monitoru başlat",
+            command=self.on_start_monitor,
+            width=160,
+        )
+        self.btn_monitor_start.grid(row=0, column=5, sticky="w", padx=(0, 8))
+
+        self.btn_monitor_stop = ModernButton(
+            monitor_controls,
+            text="⏹️ Dayandır",
+            command=self.on_stop_monitor,
+            width=120,
+        )
+        self.btn_monitor_stop.grid(row=0, column=6, sticky="w")
+        self.btn_monitor_stop.set_disabled(True)
+
+        monitor_controls.columnconfigure(7, weight=1)
+
+        monitor_status_frame = ttk.Frame(monitor_frame, style="Card.TFrame")
+        monitor_status_frame.pack(fill="x", pady=(0, 8))
+
+        ttk.Label(
+            monitor_status_frame,
+            textvariable=self.monitor_status_var,
+            style="Normal.TLabel",
+        ).pack(side="left")
+
+        ttk.Label(
+            monitor_status_frame,
+            textvariable=self.monitor_signal_var,
+            style="Secondary.TLabel",
+        ).pack(side="right")
+
+        monitor_grid = ttk.Frame(monitor_frame, style="Card.TFrame")
+        monitor_grid.pack(fill="x", pady=(0, 8))
+
+        monitor_rows = [
+            ("Side", self.monitor_side_var),
+            ("Entry", self.monitor_entry_var),
+            ("Mark Price", self.monitor_mark_var),
+            ("PnL (USDT)", self.monitor_pnl_var),
+            ("ROI %", self.monitor_roi_var),
+            ("Leverage", self.monitor_leverage_var),
+            ("Liquidation", self.monitor_liq_var),
+        ]
+
+        for idx, (label, var) in enumerate(monitor_rows):
+            row = idx // 3
+            col = (idx % 3) * 2
+            ttk.Label(monitor_grid, text=f"{label}:", style="Secondary.TLabel").grid(
+                row=row, column=col, sticky="w", padx=(0, 6), pady=3
+            )
+            ttk.Label(monitor_grid, textvariable=var, style="Normal.TLabel").grid(
+                row=row, column=col + 1, sticky="w", padx=(0, 18), pady=3
+            )
+
+        for col in range(6):
+            monitor_grid.columnconfigure(col, weight=1)
+
+        ttk.Label(
+            monitor_frame,
+            text="Aktiv pending order/pozisiyalar",
+            style="Secondary.TLabel",
+        ).pack(anchor="w", pady=(6, 4))
+
+        self.active_monitor_text = tk.Text(
+            monitor_frame,
+            height=6,
+            wrap="word",
+            bg=ModernStyle.BG_LIGHT,
+            fg=ModernStyle.TEXT_PRIMARY,
+            insertbackground=ModernStyle.ACCENT_PRIMARY,
+            font=ModernStyle.FONT_MONO,
+            relief="flat",
+            padx=8,
+            pady=6,
+        )
+        self.active_monitor_text.pack(fill="x")
+        self.active_monitor_text.configure(state="disabled")
 
         ttk.Separator(output_card, orient="horizontal").pack(fill="x", pady=(12, 8))
 
@@ -1764,6 +1908,15 @@ class App:
                     self.status_indicator.set_state("error")
                     self.progress_pct_var.set("0%")
                     messagebox.showerror("Xəta", err)
+
+                elif kind == "monitor_update":
+                    _, payload = msg
+                    self._update_monitor_display(payload)
+
+                elif kind == "monitor_error":
+                    _, err = msg
+                    self.monitor_status_var.set(f"Monitor xətası: {err}")
+                    self.monitor_signal_var.set("⚠️ API problem")
         
         except queue.Empty:
             pass
@@ -1996,3 +2149,177 @@ class App:
                 var.set(steps[idx])
             else:
                 var.set("")
+
+    def _apply_best_to_monitor(self) -> None:
+        symbol = self.best_symbol_var.get().strip()
+        if symbol and symbol != "-":
+            self.monitor_symbol_var.set(symbol)
+
+    def on_start_monitor(self) -> None:
+        if self._monitoring:
+            return
+        self._monitor_event.clear()
+        self._monitoring = True
+        self.monitor_status_var.set("Monitor işə düşür...")
+        self.btn_monitor_start.set_disabled(True)
+        self.btn_monitor_stop.set_disabled(False)
+        self._monitor_thread = threading.Thread(target=self._monitor_worker, daemon=True)
+        self._monitor_thread.start()
+
+    def on_stop_monitor(self) -> None:
+        if not self._monitoring:
+            return
+        self._monitor_event.set()
+        self._monitoring = False
+        self.monitor_status_var.set("Monitor dayandırıldı.")
+        self.monitor_signal_var.set("-")
+        self.btn_monitor_start.set_disabled(False)
+        self.btn_monitor_stop.set_disabled(True)
+
+    def _monitor_worker(self) -> None:
+        profit_take_pct = float(
+            self.settings.get("monitor", {}).get("profit_take_pct", 1.5)
+        )
+        stop_loss_pct = float(
+            self.settings.get("monitor", {}).get("stop_loss_pct", 1.0)
+        )
+        liq_warn_pct = float(
+            self.settings.get("monitor", {}).get("liquidation_warn_pct", 6.0)
+        )
+        while not self._monitor_event.is_set():
+            symbol = self.monitor_symbol_var.get().strip().upper()
+            try:
+                positions = binance_data.get_open_positions()
+                orders = binance_data.get_open_orders()
+                focus = None
+                if symbol:
+                    focus = next(
+                        (p for p in positions if p.get("symbol") == symbol),
+                        None,
+                    )
+                elif positions:
+                    focus = positions[0]
+
+                payload = self._build_monitor_payload(
+                    focus,
+                    positions,
+                    orders,
+                    profit_take_pct,
+                    stop_loss_pct,
+                    liq_warn_pct,
+                )
+                self._q.put(("monitor_update", payload))
+            except Exception as e:
+                self._q.put(("monitor_error", str(e)))
+
+            try:
+                interval = int(self.monitor_interval_var.get())
+            except (ValueError, tk.TclError):
+                interval = 5
+            interval = max(2, min(60, interval))
+            for _ in range(interval * 10):
+                if self._monitor_event.is_set():
+                    break
+                time.sleep(0.1)
+
+    def _build_monitor_payload(
+        self,
+        focus: Optional[dict],
+        positions: list[dict],
+        orders: list[dict],
+        profit_take_pct: float,
+        stop_loss_pct: float,
+        liq_warn_pct: float,
+    ) -> dict:
+        signal = "Monitor aktivdir."
+        status = "Məlumat yenilənir..."
+        if not positions and not orders:
+            status = "Aktiv order/pozisiya yoxdur."
+            signal = "Gözləmə rejimi."
+        elif focus:
+            symbol = focus.get("symbol", "-")
+            status = f"{symbol} izlənir."
+            pnl = float(focus.get("unrealized_profit", 0.0))
+            notional = abs(float(focus.get("notional", 0.0)))
+            pnl_pct = (pnl / notional * 100) if notional > 0 else 0.0
+            if pnl_pct >= profit_take_pct:
+                signal = "🟢 Profit siqnalı: Take Profit düşün."
+            elif pnl_pct <= -stop_loss_pct:
+                signal = "🔴 Risk siqnalı: Close trade düşün."
+            else:
+                signal = "🟡 Monitor davam edir."
+            liq_price = float(focus.get("liquidation_price", 0.0))
+            mark_price = float(focus.get("mark_price", 0.0))
+            if liq_price > 0 and mark_price > 0:
+                distance_pct = abs((mark_price - liq_price) / mark_price) * 100
+                if distance_pct <= liq_warn_pct:
+                    signal += " ⚠️ Likvidasiya riski yüksəkdir."
+
+        summary = self._format_monitor_summary(positions, orders)
+        return {
+            "focus": focus,
+            "status": status,
+            "signal": signal,
+            "summary": summary,
+        }
+
+    def _format_monitor_summary(
+        self,
+        positions: list[dict],
+        orders: list[dict],
+    ) -> str:
+        lines = []
+        if positions:
+            lines.append("📌 Açıq pozisiyalar:")
+            for pos in positions:
+                pnl = float(pos.get("unrealized_profit", 0.0))
+                notional = abs(float(pos.get("notional", 0.0)))
+                pnl_pct = (pnl / notional * 100) if notional > 0 else 0.0
+                lines.append(
+                    f"• {pos.get('symbol')} {pos.get('side')} "
+                    f"Entry {pos.get('entry_price', 0.0):.6f} | "
+                    f"Mark {pos.get('mark_price', 0.0):.6f} | "
+                    f"PnL {pnl:.4f} ({pnl_pct:.2f}%)"
+                )
+        if orders:
+            lines.append("🟡 Pending order-lar:")
+            for order in orders:
+                lines.append(
+                    f"• {order.get('symbol')} {order.get('side')} {order.get('type')} "
+                    f"Price {order.get('price', 0.0):.6f} "
+                    f"Qty {order.get('origQty', 0.0):.6f} "
+                    f"[{order.get('status')}]"
+                )
+        if not lines:
+            lines.append("Aktiv məlumat yoxdur.")
+        return "\n".join(lines)
+
+    def _update_monitor_display(self, payload: dict) -> None:
+        self.monitor_status_var.set(payload.get("status", "-"))
+        self.monitor_signal_var.set(payload.get("signal", "-"))
+        focus = payload.get("focus")
+        if not focus:
+            self.monitor_side_var.set("-")
+            self.monitor_entry_var.set("-")
+            self.monitor_mark_var.set("-")
+            self.monitor_pnl_var.set("-")
+            self.monitor_roi_var.set("-")
+            self.monitor_leverage_var.set("-")
+            self.monitor_liq_var.set("-")
+        else:
+            pnl = float(focus.get("unrealized_profit", 0.0))
+            notional = abs(float(focus.get("notional", 0.0)))
+            pnl_pct = (pnl / notional * 100) if notional > 0 else 0.0
+            self.monitor_side_var.set(focus.get("side", "-"))
+            self.monitor_entry_var.set(f"{focus.get('entry_price', 0.0):.6f}")
+            self.monitor_mark_var.set(f"{focus.get('mark_price', 0.0):.6f}")
+            self.monitor_pnl_var.set(f"{pnl:.4f}")
+            self.monitor_roi_var.set(f"{pnl_pct:.2f}%")
+            self.monitor_leverage_var.set(f"{focus.get('leverage', '-')}")
+            liq_price = float(focus.get("liquidation_price", 0.0))
+            self.monitor_liq_var.set(f"{liq_price:.6f}" if liq_price > 0 else "-")
+
+        self.active_monitor_text.configure(state="normal")
+        self.active_monitor_text.delete("1.0", "end")
+        self.active_monitor_text.insert("end", payload.get("summary", "-"))
+        self.active_monitor_text.configure(state="disabled")
