@@ -86,6 +86,92 @@ def list_usdtm_perp_symbols_by_volume(limit: int = 200) -> List[str]:
     return [symbol for symbol, _ in ranked[:limit]]
 
 
+def get_open_orders(symbol: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Return open futures orders.
+
+    Args:
+        symbol: Optional symbol filter.
+    """
+    try:
+        if symbol:
+            orders = client.futures_open_orders(symbol=symbol)
+        else:
+            orders = client.futures_open_orders()
+    except Exception:
+        return []
+
+    normalized = []
+    for order in orders or []:
+        try:
+            normalized.append(
+                {
+                    "symbol": order.get("symbol"),
+                    "side": order.get("side"),
+                    "type": order.get("type"),
+                    "price": float(order.get("price", 0.0)),
+                    "stopPrice": float(order.get("stopPrice", 0.0)),
+                    "origQty": float(order.get("origQty", 0.0)),
+                    "status": order.get("status"),
+                    "reduceOnly": bool(order.get("reduceOnly", False)),
+                    "timeInForce": order.get("timeInForce"),
+                }
+            )
+        except (TypeError, ValueError):
+            continue
+    return normalized
+
+
+def get_open_positions(symbol: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Return open futures positions (positionAmt != 0).
+
+    Args:
+        symbol: Optional symbol filter.
+    """
+    try:
+        if symbol:
+            positions = client.futures_position_information(symbol=symbol)
+        else:
+            positions = client.futures_position_information()
+    except Exception:
+        return []
+
+    normalized = []
+    for pos in positions or []:
+        try:
+            amt = float(pos.get("positionAmt", 0.0))
+        except (TypeError, ValueError):
+            continue
+        if amt == 0:
+            continue
+        try:
+            entry_price = float(pos.get("entryPrice", 0.0))
+            mark_price = float(pos.get("markPrice", 0.0))
+            leverage = int(float(pos.get("leverage", 0)))
+            liquidation_price = float(pos.get("liquidationPrice", 0.0))
+            unrealized_profit = float(pos.get("unRealizedProfit", 0.0))
+            notional = float(pos.get("notional", 0.0))
+            initial_margin = float(pos.get("initialMargin", 0.0))
+        except (TypeError, ValueError):
+            continue
+        normalized.append(
+            {
+                "symbol": pos.get("symbol"),
+                "side": "LONG" if amt > 0 else "SHORT",
+                "position_amt": amt,
+                "entry_price": entry_price,
+                "mark_price": mark_price,
+                "leverage": leverage,
+                "liquidation_price": liquidation_price,
+                "unrealized_profit": unrealized_profit,
+                "notional": notional,
+                "initial_margin": initial_margin,
+            }
+        )
+    return normalized
+
+
 def get_symbol_filters(symbol: str) -> Dict[str, float]:
     m = _symbol_meta(symbol) or {}
     tick = 0.0
@@ -571,4 +657,3 @@ def get_comprehensive_market_data(symbol: str) -> Dict[str, Any]:
         "bullishSignals": bullish_signals,
         "bearishSignals": bearish_signals,
     }
-
