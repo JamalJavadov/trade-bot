@@ -1523,7 +1523,7 @@ class App:
 
         ttk.Label(
             monitor_controls,
-            text="Market/Symbol:",
+            text="Market/Symbol (opsional):",
             style="Secondary.TLabel",
         ).grid(row=0, column=0, sticky="w", padx=(0, 6))
 
@@ -2191,15 +2191,7 @@ class App:
             try:
                 positions = binance_data.get_open_positions()
                 orders = binance_data.get_open_orders()
-                focus = None
-                if symbol:
-                    focus = next(
-                        (p for p in positions if p.get("symbol") == symbol),
-                        None,
-                    )
-                elif positions:
-                    focus = positions[0]
-
+                focus = self._select_monitor_focus(symbol, positions, orders)
                 payload = self._build_monitor_payload(
                     focus,
                     positions,
@@ -2238,22 +2230,26 @@ class App:
             signal = "Gözləmə rejimi."
         elif focus:
             symbol = focus.get("symbol", "-")
+            focus_type = focus.get("focus_type", "position")
             status = f"{symbol} izlənir."
-            pnl = float(focus.get("unrealized_profit", 0.0))
-            notional = abs(float(focus.get("notional", 0.0)))
-            pnl_pct = (pnl / notional * 100) if notional > 0 else 0.0
-            if pnl_pct >= profit_take_pct:
-                signal = "🟢 Profit siqnalı: Take Profit düşün."
-            elif pnl_pct <= -stop_loss_pct:
-                signal = "🔴 Risk siqnalı: Close trade düşün."
+            if focus_type == "position":
+                pnl = float(focus.get("unrealized_profit", 0.0))
+                notional = abs(float(focus.get("notional", 0.0)))
+                pnl_pct = (pnl / notional * 100) if notional > 0 else 0.0
+                if pnl_pct >= profit_take_pct:
+                    signal = "🟢 Profit siqnalı: Take Profit düşün."
+                elif pnl_pct <= -stop_loss_pct:
+                    signal = "🔴 Risk siqnalı: Close trade düşün."
+                else:
+                    signal = "🟡 Monitor davam edir."
+                liq_price = float(focus.get("liquidation_price", 0.0))
+                mark_price = float(focus.get("mark_price", 0.0))
+                if liq_price > 0 and mark_price > 0:
+                    distance_pct = abs((mark_price - liq_price) / mark_price) * 100
+                    if distance_pct <= liq_warn_pct:
+                        signal += " ⚠️ Likvidasiya riski yüksəkdir."
             else:
-                signal = "🟡 Monitor davam edir."
-            liq_price = float(focus.get("liquidation_price", 0.0))
-            mark_price = float(focus.get("mark_price", 0.0))
-            if liq_price > 0 and mark_price > 0:
-                distance_pct = abs((mark_price - liq_price) / mark_price) * 100
-                if distance_pct <= liq_warn_pct:
-                    signal += " ⚠️ Likvidasiya riski yüksəkdir."
+                signal = "🟠 Pending order izlənir."
 
         summary = self._format_monitor_summary(positions, orders)
         return {
@@ -2262,6 +2258,38 @@ class App:
             "signal": signal,
             "summary": summary,
         }
+
+    def _select_monitor_focus(
+        self,
+        symbol: str,
+        positions: list[dict],
+        orders: list[dict],
+    ) -> Optional[dict]:
+        focus_position = None
+        focus_order = None
+        if symbol:
+            focus_position = next(
+                (p for p in positions if p.get("symbol") == symbol),
+                None,
+            )
+            focus_order = next(
+                (o for o in orders if o.get("symbol") == symbol),
+                None,
+            )
+        if not focus_position and not focus_order:
+            if positions:
+                focus_position = max(
+                    positions,
+                    key=lambda p: abs(float(p.get("notional", 0.0))),
+                )
+            elif orders:
+                focus_order = orders[0]
+
+        if focus_position:
+            return {**focus_position, "focus_type": "position"}
+        if focus_order:
+            return {**focus_order, "focus_type": "order"}
+        return None
 
     def _format_monitor_summary(
         self,
@@ -2307,17 +2335,30 @@ class App:
             self.monitor_leverage_var.set("-")
             self.monitor_liq_var.set("-")
         else:
-            pnl = float(focus.get("unrealized_profit", 0.0))
-            notional = abs(float(focus.get("notional", 0.0)))
-            pnl_pct = (pnl / notional * 100) if notional > 0 else 0.0
+            focus_type = focus.get("focus_type", "position")
             self.monitor_side_var.set(focus.get("side", "-"))
-            self.monitor_entry_var.set(f"{focus.get('entry_price', 0.0):.6f}")
-            self.monitor_mark_var.set(f"{focus.get('mark_price', 0.0):.6f}")
-            self.monitor_pnl_var.set(f"{pnl:.4f}")
-            self.monitor_roi_var.set(f"{pnl_pct:.2f}%")
-            self.monitor_leverage_var.set(f"{focus.get('leverage', '-')}")
-            liq_price = float(focus.get("liquidation_price", 0.0))
-            self.monitor_liq_var.set(f"{liq_price:.6f}" if liq_price > 0 else "-")
+            if focus_type == "position":
+                pnl = float(focus.get("unrealized_profit", 0.0))
+                notional = abs(float(focus.get("notional", 0.0)))
+                pnl_pct = (pnl / notional * 100) if notional > 0 else 0.0
+                self.monitor_entry_var.set(f"{focus.get('entry_price', 0.0):.6f}")
+                self.monitor_mark_var.set(f"{focus.get('mark_price', 0.0):.6f}")
+                self.monitor_pnl_var.set(f"{pnl:.4f}")
+                self.monitor_roi_var.set(f"{pnl_pct:.2f}%")
+                self.monitor_leverage_var.set(f"{focus.get('leverage', '-')}")
+                liq_price = float(focus.get("liquidation_price", 0.0))
+                self.monitor_liq_var.set(f"{liq_price:.6f}" if liq_price > 0 else "-")
+            else:
+                entry_price = float(focus.get("price", 0.0))
+                stop_price = float(focus.get("stopPrice", 0.0))
+                self.monitor_entry_var.set(
+                    f"{entry_price:.6f}" if entry_price > 0 else f"{stop_price:.6f}"
+                )
+                self.monitor_mark_var.set("-")
+                self.monitor_pnl_var.set("-")
+                self.monitor_roi_var.set("-")
+                self.monitor_leverage_var.set("-")
+                self.monitor_liq_var.set("-")
 
         self.active_monitor_text.configure(state="normal")
         self.active_monitor_text.delete("1.0", "end")
