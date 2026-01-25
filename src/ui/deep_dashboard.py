@@ -294,11 +294,27 @@ class DeepAnalysisDashboard(ttk.Frame):
         """Create signal display section."""
         signal_card = ttk.LabelFrame(
             parent,
-            text="🎯 Trade Signal",
+            text="🎯 Trade Signal & Action",
             style="DeepCard.TLabelframe",
             padding=10
         )
         signal_card.pack(fill="x", pady=5)
+        
+        # Action Recommendation (New)
+        self.action_frame = ttk.Frame(signal_card, style="DeepCard.TFrame")
+        self.action_frame.pack(fill="x", pady=(0, 10))
+        
+        self.action_label = ttk.Label(
+            self.action_frame,
+            text="WAIT FOR SETUP",
+            font=("Segoe UI", 16, "bold"),
+            foreground=DeepStyle.TEXT_SECONDARY,
+            background=DeepStyle.BG_MEDIUM,
+            anchor="center"
+        )
+        self.action_label.pack(fill="x", pady=5)
+        
+        ttk.Separator(signal_card, orient="horizontal").pack(fill="x", pady=5)
         
         self.signal_panel = SignalPanel(signal_card)
         self.signal_panel.pack(fill="x", expand=True)
@@ -449,6 +465,28 @@ class DeepAnalysisDashboard(ttk.Frame):
             result.get("confidence", 0.0),
             result.get("side", "NONE")
         )
+        
+        # Update Action Recommendation
+        sig = result.get("signal", "NEUTRAL")
+        conf = result.get("confidence", 0.0)
+        
+        action_text = "⚠️ WAIT / MONITOR"
+        action_color = DeepStyle.TEXT_SECONDARY
+        
+        if sig == "STRONG_BUY":
+            action_text = "🚀 ENTER LONG (AGRESSIVE)" if conf > 80 else "✅ ENTER LONG (CONFIRMED)"
+            action_color = DeepStyle.ACCENT_SUCCESS
+        elif sig == "BUY":
+            action_text = "✅ ENTER LONG (WAIT CONFIRMATION)"
+            action_color = DeepStyle.ACCENT_SUCCESS
+        elif sig == "STRONG_SELL":
+            action_text = "🚀 ENTER SHORT (AGRESSIVE)" if conf > 80 else "✅ ENTER SHORT (CONFIRMED)"
+            action_color = DeepStyle.ACCENT_ERROR
+        elif sig == "SELL":
+            action_text = "✅ ENTER SHORT (WAIT CONFIRMATION)"
+            action_color = DeepStyle.ACCENT_ERROR
+            
+        self.action_label.configure(text=action_text, foreground=action_color)
         
         # Update components
         components = [

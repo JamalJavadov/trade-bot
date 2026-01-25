@@ -113,10 +113,10 @@
     "remember_last": true,
     "auto_all_usdtm": true,
     "auto_top_usdtm": false,
-    "top_limit": 50
+    "top_limit": 5
   },
   "budget": {
-    "default_usdt": 2.2
+    "default_usdt": 2.0
   },
   "risk": {
     "risk_pct": 0.1,

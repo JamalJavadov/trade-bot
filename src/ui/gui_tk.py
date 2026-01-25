@@ -3,18 +3,22 @@ from __future__ import annotations
 import threading
 import time
 import queue
+import subprocess
 import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import Optional
 
 from ..core import binance_data
 from ..core import analyzer
+from ..core.news import NewsAnalyzer
 from ..core.planner import (
     load_settings,
     save_settings,
     run_scan_and_build_best_plan,
     format_report,
 )
+from ..core.position_monitor import PositionMonitor
+from .deep_dashboard import DeepAnalysisDashboard, DeepAnalysisWindow
 
 
 class ModernStyle:
@@ -597,6 +601,10 @@ class ModernButton(tk.Canvas):
         self.hovered = False
         self.disabled = False
         
+        # Extract custom colors if provided, otherwise None (use defaults in _draw)
+        self.custom_bg = kwargs.pop("btn_bg", None)
+        self.custom_fg = kwargs.pop("btn_fg", None)
+        
         super().__init__(
             parent,
             height=36,
@@ -623,7 +631,12 @@ class ModernButton(tk.Canvas):
         if self.disabled:
             bg_color = ModernStyle.BG_PANEL
         else:
-            bg_color = ModernStyle.ACCENT_PRIMARY if self.hovered else ModernStyle.BG_LIGHT
+            if self.hovered:
+                bg_color = ModernStyle.ACCENT_PRIMARY 
+            else:
+                # Use custom bg if provided, else default light bg
+                bg_color = self.custom_bg if self.custom_bg else ModernStyle.BG_LIGHT
+                
         self.create_rectangle(
             2, 2, width-2, height-2,
             fill=bg_color,
@@ -635,7 +648,12 @@ class ModernButton(tk.Canvas):
         if self.disabled:
             text_color = ModernStyle.TEXT_MUTED
         else:
-            text_color = ModernStyle.BG_DARK if self.hovered else ModernStyle.TEXT_PRIMARY
+            if self.hovered:
+                text_color = ModernStyle.BG_DARK
+            else:
+                # Use custom fg if provided, else default primary text
+                text_color = self.custom_fg if self.custom_fg else ModernStyle.TEXT_PRIMARY
+                
         self.create_text(
             width // 2, height // 2,
             text=self.text,
@@ -679,6 +697,7 @@ class App:
         self._spinning = False
         self._spinner_i = 0
         self._spinner_frames = ["◐", "◓", "◑", "◒"]
+        self.latest_best_plan = None
         self._monitor_thread: Optional[threading.Thread] = None
         self._monitor_event = threading.Event()
         self._monitoring = False
@@ -686,6 +705,15 @@ class App:
         # Settings
         self.settings = load_settings("settings.json")
         
+        # News/Sentiment Analyzer
+        self.news_analyzer = NewsAnalyzer()
+        
+        # Position Monitor
+        self.position_monitor = PositionMonitor(self.settings, self._q)
+        
+        # Dashboard separate window
+        self.dashboard_window = None
+
         # Style konfiqurasiyası
         self._setup_styles()
 
@@ -698,9 +726,27 @@ class App:
         self._create_symbols_section()
         self._create_scan_section()
         self._create_output_section()
+        self._create_news_section()
         
         # Queue polling
         self.root.after(120, self._poll_queue)
+
+    def _play_success_sound(self):
+        """Play a 5-second sound signal in a separate thread."""
+        def sound_worker():
+            try:
+                # Try macOS afplay first (Glass sound is pleasant)
+                for _ in range(3): # Play 3 times (~5 seconds total duration for Glass.aiff)
+                    subprocess.run(["afplay", "/System/Library/Sounds/Glass.aiff"], check=False)
+                    time.sleep(0.5)
+            except Exception:
+                # Fallback to system bell loop
+                for _ in range(5):
+                    self.root.bell()
+                    print('\a')
+                    time.sleep(1)
+        
+        threading.Thread(target=sound_worker, daemon=True).start()
 
     def _create_scroll_container(self) -> None:
         self.page_container = ttk.Frame(self.root, style="Dark.TFrame")
@@ -1383,6 +1429,26 @@ class App:
 
         details_frame = ttk.Frame(best_frame, style="Card.TFrame")
         details_frame.pack(fill="x", pady=(8, 0))
+        
+        # Action Buttons Frame
+        action_frame = ttk.Frame(best_frame, style="Card.TFrame")
+        action_frame.pack(fill="x", pady=(10, 0))
+        
+        self.btn_execute = ModernButton(
+            action_frame,
+            text="🚀 Execute Best Trade",
+            command=self.on_execute_best,
+            width=220,
+            btn_bg=ModernStyle.ACCENT_PURPLE,
+            btn_fg=ModernStyle.TEXT_PRIMARY
+        )
+        self.btn_execute.pack(side="left")
+        
+        ttk.Label(
+            action_frame,
+            text="⚠️ Real əməliyyat açır (Limit + TP/SL)",
+            style="Muted.TLabel"
+        ).pack(side="left", padx=10)
 
         ttk.Label(details_frame, text="Əlavə məlumat / səbəb:", style="Secondary.TLabel").pack(
             anchor="w", pady=(0, 4)
@@ -1620,24 +1686,29 @@ class App:
 
         ttk.Label(
             monitor_frame,
-            text="Aktiv pending order/pozisiyalar",
+            text="Active Positions (Deep Analysis)",
             style="Secondary.TLabel",
         ).pack(anchor="w", pady=(6, 4))
 
-        self.active_monitor_text = tk.Text(
-            monitor_frame,
-            height=6,
-            wrap="word",
-            bg=ModernStyle.BG_LIGHT,
-            fg=ModernStyle.TEXT_PRIMARY,
-            insertbackground=ModernStyle.ACCENT_PRIMARY,
-            font=ModernStyle.FONT_MONO,
-            relief="flat",
-            padx=8,
-            pady=6,
-        )
-        self.active_monitor_text.pack(fill="x")
-        self.active_monitor_text.configure(state="disabled")
+        # Compact Health View & Open Button
+        health_frame = ttk.Frame(monitor_frame, style="Card.TFrame")
+        health_frame.pack(fill="x", pady=5)
+        
+        # Open Dashboard Button
+        ModernButton(
+            health_frame,
+            text="🖥️ Open Control Panel",
+            command=self.on_open_dashboard,
+            width=200
+        ).pack(side="left")
+        
+        # Summary Label (Space filler / quick status)
+        self.compact_status_var = tk.StringVar(value="Status: Idle")
+        ttk.Label(
+            health_frame, 
+            textvariable=self.compact_status_var,
+            style="Secondary.TLabel"
+        ).pack(side="left", padx=15)
 
         ttk.Separator(output_card, orient="horizontal").pack(fill="x", pady=(12, 8))
 
@@ -1791,6 +1862,66 @@ class App:
         self._spinner_i += 1
         self.root.after(120, self._spin_tick)
     
+    def on_execute_best(self):
+        """Execute the currently stored best plan."""
+        plan = self.latest_best_plan
+        if not plan:
+            messagebox.showwarning("Xəbərdarlıq", "Hələ heç bir 'Best Plan' tapılmayıb.\nƏvvəlcə skan edin.")
+            return
+            
+        symbol = plan.get("symbol")
+        side = plan.get("side")
+        qty = float(plan.get("qty", 0))
+        entry = float(plan.get("entry", 0))
+        sl = float(plan.get("sl", 0))
+        tp = float(plan.get("tp2", 0))
+        lev = int(plan.get("leverage", 1))
+        
+        msg = f"""Sifarişi təsdiqləyin:
+        
+Market: {symbol}
+Side: {side}
+Leverage: {lev}x
+Qty: {qty}
+Entry (Limit): {entry}
+Stop Loss: {sl}
+Take Profit: {tp}
+
+Bu real əməliyyatdır! Davam edilsin?"""
+
+        if not messagebox.askyesno("Təsdiq", msg, icon='warning'):
+            return
+            
+        # Execute logic inside worker to stay responsive
+        def trade_worker():
+            self._q.put(("stage", "🚀 Sifariş göndərilir..."))
+            try:
+                res = binance_data.place_trade_setup(
+                    symbol=symbol,
+                    side=side,
+                    entry_price=entry,
+                    quantity=qty,
+                    tp_price=tp,
+                    sl_price=sl,
+                    leverage=lev
+                )
+                
+                status = res.get("status")
+                logs = "\n".join(res.get("logs", []))
+                
+                if status == "success":
+                    self._q.put(("info", f"✅ Uğurlu!\n\n{logs}"))
+                else:
+                    err = res.get("error", "Unknown error")
+                    self._q.put(("error", f"❌ Xəta baş verdi:\n{err}\n\nLogs:\n{logs}"))
+                    
+            except Exception as e:
+                self._q.put(("error", f"System Error: {e}"))
+            
+            self._q.put(("stage", "Hazır"))
+
+        threading.Thread(target=trade_worker, daemon=True).start()
+
     def on_scan(self):
         self.on_save()
         
@@ -1900,6 +2031,9 @@ class App:
                     self._update_summary(summary)
                     self._set_best_plan(best_payload)
                     self.progress_pct_var.set("100%")
+                    
+                    # Sound Signal (5 seconds)
+                    self._play_success_sound()
                 
                 elif kind == "error":
                     _, err = msg
@@ -1908,6 +2042,10 @@ class App:
                     self.status_indicator.set_state("error")
                     self.progress_pct_var.set("0%")
                     messagebox.showerror("Xəta", err)
+                
+                elif kind == "info":
+                    _, text = msg
+                    messagebox.showinfo("Məlumat", text)
 
                 elif kind == "monitor_update":
                     _, payload = msg
@@ -1917,6 +2055,30 @@ class App:
                     _, err = msg
                     self.monitor_status_var.set(f"Monitor xətası: {err}")
                     self.monitor_signal_var.set("⚠️ API problem")
+
+                elif kind == "position_analysis_update":
+                    _, payload = msg
+                    self._handle_position_update(payload)
+                
+                elif kind == "monitor_status":
+                    _, status = msg
+                    self.monitor_status_var.set(status)
+
+                elif kind == "position_analysis_update":
+                    _, payload = msg
+                    self._handle_position_update(payload)
+                
+                elif kind == "monitor_status":
+                    _, status = msg
+                    self.monitor_status_var.set(status)
+
+                elif kind == "position_analysis_update":
+                    _, payload = msg
+                    self._handle_position_update(payload)
+                
+                elif kind == "monitor_status":
+                    _, status = msg
+                    self.monitor_status_var.set(status)
         
         except queue.Empty:
             pass
@@ -1960,6 +2122,7 @@ class App:
         }
 
     def _set_best_plan(self, best: Optional[dict]) -> None:
+        self.latest_best_plan = best
         if not best:
             self.best_headline_var.set("-")
             self.best_subtitle_var.set("Skan nəticəsi gözlənilir.")
@@ -2163,204 +2326,187 @@ class App:
         self.monitor_status_var.set("Monitor işə düşür...")
         self.btn_monitor_start.set_disabled(True)
         self.btn_monitor_stop.set_disabled(False)
-        self._monitor_thread = threading.Thread(target=self._monitor_worker, daemon=True)
-        self._monitor_thread.start()
+        self.position_monitor.start()
 
     def on_stop_monitor(self) -> None:
         if not self._monitoring:
             return
-        self._monitor_event.set()
+        self.position_monitor.stop()
         self._monitoring = False
         self.monitor_status_var.set("Monitor dayandırıldı.")
         self.monitor_signal_var.set("-")
         self.btn_monitor_start.set_disabled(False)
         self.btn_monitor_stop.set_disabled(True)
 
-    def _monitor_worker(self) -> None:
-        profit_take_pct = float(
-            self.settings.get("monitor", {}).get("profit_take_pct", 1.5)
+    def _handle_position_update(self, payload: dict) -> None:
+        """Handle deep analysis update from PositionMonitor."""
+        health = payload.get("health", {})
+        score = health.get("score", 50.0)
+        reason = health.get("reason", "")
+        
+        # Update Status Bar
+        symbol = payload.get("symbol", "-")
+        self.monitor_status_var.set(f"Monitoring: {symbol}")
+        self.monitor_signal_var.set(f"Health: {score:.1f}% ({reason})")
+        
+        # Update Dashboard
+        analysis_result = payload.get("deep_analysis")
+        if analysis_result:
+            # Reconstruct details dict if needed or pass directly if compatible
+            # The dashboard expects a dict with specific keys. 
+            # We can use update_from_analysis_result which expects a dict representation.
+            # Ideally deep_analyzer should have a to_dict method or we access attributes.
+            # Assuming payload['deep_analysis'] is the object, we need to convert it.
+            # But wait, deep_dashboard.py: update_from_analysis_result takes a Dict.
+            # deep_analyzer.DeepAnalysisResult is a dataclass.
+            
+            # Let's create a helper to convert DeepAnalysisResult to dict for the dashboard
+            res = analysis_result
+            
+            # Prepare dashboard data
+            dash_data = {
+                "confidence": res.confidence,
+                "quality_score": res.quality_score,
+                "signal": res.signal,
+                "side": res.side,
+                "indicator_score": res.indicator_score,
+                "structure_score": res.structure_score,
+                "volume_score": res.volume_score,
+                "mtf_score": res.mtf_score,
+                "market_data_score": res.market_data_score,
+                "entry": res.entry,
+                "sl": res.stop_loss,
+                "tp1": res.take_profit_1,
+                "tp2": res.take_profit_2,
+                "reasons": res.reasons,
+                "warnings": res.warnings,
+                "indicators": res.indicators.indicators if res.indicators else {}
+            }
+            
+            # Sync to separate window if open
+            if self.dashboard_window and self.dashboard_window.winfo_exists():
+                self.dashboard_window.update_from_result(dash_data)
+                
+                # Update metrics if available
+                metrics = payload.get("metrics")
+                if metrics:
+                    self.dashboard_window.dashboard.update_metrics(metrics)
+                
+            # Update Compact Status
+            self.compact_status_var.set(f"Signal: {res.signal} | Conf: {res.confidence:.1f}%")
+            
+            # We also have NEWS in the payload!
+            # payload['news'] is a list of news items.
+            # The dashboard doesn't have a news section yet? 
+            # Wait, I added it to gui_tk.py separately as `self.news_text`, 
+            # but I didn't integrate it into `DeepAnalysisDashboard`.
+            # However, the user asked for visual effects.
+            # I can update `self._update_news_display` with the specific coin news?
+            # Yes, let's update the specific news section I created earlier with this context.
+            if payload.get("news"):
+                self._update_news_display(payload["news"])
+                self.news_status_var.set(f"Showing news for {symbol}")
+
+    # Old monitor methods removed (replaced by PositionMonitor)
+
+    def _create_news_section(self):
+        """Creates the News & Sentiment Analysis section in the UI."""
+        news_frame = ttk.LabelFrame(
+            self.page_frame,
+            text="📰 Crypto News & Sentiment Analysis",
+            style="Card.TLabelframe",
+            padding=10
         )
-        stop_loss_pct = float(
-            self.settings.get("monitor", {}).get("stop_loss_pct", 1.0)
+        news_frame.pack(fill="x", padx=20, pady=10)
+        
+        controls_frame = ttk.Frame(news_frame, style="Card.TFrame")
+        controls_frame.pack(fill="x", pady=(0, 10))
+        
+        ModernButton(
+            controls_frame,
+            text="🔄 Refresh News",
+            command=self.on_refresh_news,
+            width=160
+        ).pack(side="left")
+        
+        self.news_status_var = tk.StringVar(value="Ready to fetch news.")
+        ttk.Label(
+            controls_frame,
+            textvariable=self.news_status_var,
+            style="Secondary.TLabel"
+        ).pack(side="left", padx=10)
+        
+        # Scrollable Text area for news
+        self.news_text = tk.Text(
+            news_frame,
+            height=12,
+            wrap="word",
+            bg=ModernStyle.BG_LIGHT,
+            fg=ModernStyle.TEXT_PRIMARY,
+            insertbackground=ModernStyle.ACCENT_PRIMARY,
+            state="disabled",
+            font=ModernStyle.FONT_MONO,
+            relief="flat",
+            padx=10,
+            pady=10
         )
-        liq_warn_pct = float(
-            self.settings.get("monitor", {}).get("liquidation_warn_pct", 6.0)
-        )
-        while not self._monitor_event.is_set():
-            symbol = self.monitor_symbol_var.get().strip().upper()
+        self.news_text.pack(fill="x")
+        
+        # Configure tags for sentiment colors
+        self.news_text.tag_config("POSITIVE", foreground="#00ff88")
+        self.news_text.tag_config("NEGATIVE", foreground="#ff4444")
+        self.news_text.tag_config("NEUTRAL", foreground="#8892b0")
+        self.news_text.tag_config("TITLE", font=("Segoe UI Bold", 11))
+        
+    def on_refresh_news(self):
+        """Fetches and displays latest news."""
+        def worker():
             try:
-                positions = binance_data.get_open_positions()
-                orders = binance_data.get_open_orders()
-                focus = self._select_monitor_focus(symbol, positions, orders)
-                payload = self._build_monitor_payload(
-                    focus,
-                    positions,
-                    orders,
-                    profit_take_pct,
-                    stop_loss_pct,
-                    liq_warn_pct,
-                )
-                self._q.put(("monitor_update", payload))
+                self.news_status_var.set("Fetching news from CoinGecko...")
+                news_items = self.news_analyzer.get_latest_news(limit=10)
+                
+                self.root.after(0, lambda: self._update_news_display(news_items))
+                self.root.after(0, lambda: self.news_status_var.set(f"Loaded {len(news_items)} updates."))
             except Exception as e:
-                self._q.put(("monitor_error", str(e)))
+                self.root.after(0, lambda: self.news_status_var.set(f"Error: {str(e)}"))
+        
+        threading.Thread(target=worker, daemon=True).start()
+        
+    def _update_news_display(self, news_items):
+        """Updates the news text widget on the main thread."""
+        self.news_text.configure(state="normal")
+        self.news_text.delete("1.0", "end")
+        
+        if not news_items:
+            self.news_text.insert("end", "No news found or connection failed.")
+            self.news_text.configure(state="disabled")
+            return
+            
+        for item in news_items:
+            sentiment = item['sentiment']
+            label = sentiment['label']
+            
+            # Insert Title
+            self.news_text.insert("end", f"[{label}] {item['title']}\n", label)
+            
+            # Insert Description
+            self.news_text.insert("end", f"{item['description']}\n")
+            
+            # Insert Metadata
+            self.news_text.insert("end", f"Date: {item['published_at']} | Source: {item['author']}\n")
+            self.news_text.insert("end", "-" * 50 + "\n\n")
+            
+        self.news_text.configure(state="disabled")
 
-            try:
-                interval = int(self.monitor_interval_var.get())
-            except (ValueError, tk.TclError):
-                interval = 5
-            interval = max(2, min(60, interval))
-            for _ in range(interval * 10):
-                if self._monitor_event.is_set():
-                    break
-                time.sleep(0.1)
 
-    def _build_monitor_payload(
-        self,
-        focus: Optional[dict],
-        positions: list[dict],
-        orders: list[dict],
-        profit_take_pct: float,
-        stop_loss_pct: float,
-        liq_warn_pct: float,
-    ) -> dict:
-        signal = "Monitor aktivdir."
-        status = "Məlumat yenilənir..."
-        if not positions and not orders:
-            status = "Aktiv order/pozisiya yoxdur."
-            signal = "Gözləmə rejimi."
-        elif focus:
-            symbol = focus.get("symbol", "-")
-            focus_type = focus.get("focus_type", "position")
-            status = f"{symbol} izlənir."
-            if focus_type == "position":
-                pnl = float(focus.get("unrealized_profit", 0.0))
-                notional = abs(float(focus.get("notional", 0.0)))
-                pnl_pct = (pnl / notional * 100) if notional > 0 else 0.0
-                if pnl_pct >= profit_take_pct:
-                    signal = "🟢 Profit siqnalı: Take Profit düşün."
-                elif pnl_pct <= -stop_loss_pct:
-                    signal = "🔴 Risk siqnalı: Close trade düşün."
-                else:
-                    signal = "🟡 Monitor davam edir."
-                liq_price = float(focus.get("liquidation_price", 0.0))
-                mark_price = float(focus.get("mark_price", 0.0))
-                if liq_price > 0 and mark_price > 0:
-                    distance_pct = abs((mark_price - liq_price) / mark_price) * 100
-                    if distance_pct <= liq_warn_pct:
-                        signal += " ⚠️ Likvidasiya riski yüksəkdir."
-            else:
-                signal = "🟠 Pending order izlənir."
-
-        summary = self._format_monitor_summary(positions, orders)
-        return {
-            "focus": focus,
-            "status": status,
-            "signal": signal,
-            "summary": summary,
-        }
-
-    def _select_monitor_focus(
-        self,
-        symbol: str,
-        positions: list[dict],
-        orders: list[dict],
-    ) -> Optional[dict]:
-        focus_position = None
-        focus_order = None
-        if symbol:
-            focus_position = next(
-                (p for p in positions if p.get("symbol") == symbol),
-                None,
-            )
-            focus_order = next(
-                (o for o in orders if o.get("symbol") == symbol),
-                None,
-            )
-        if not focus_position and not focus_order:
-            if positions:
-                focus_position = max(
-                    positions,
-                    key=lambda p: abs(float(p.get("notional", 0.0))),
-                )
-            elif orders:
-                focus_order = orders[0]
-
-        if focus_position:
-            return {**focus_position, "focus_type": "position"}
-        if focus_order:
-            return {**focus_order, "focus_type": "order"}
-        return None
-
-    def _format_monitor_summary(
-        self,
-        positions: list[dict],
-        orders: list[dict],
-    ) -> str:
-        lines = []
-        if positions:
-            lines.append("📌 Açıq pozisiyalar:")
-            for pos in positions:
-                pnl = float(pos.get("unrealized_profit", 0.0))
-                notional = abs(float(pos.get("notional", 0.0)))
-                pnl_pct = (pnl / notional * 100) if notional > 0 else 0.0
-                lines.append(
-                    f"• {pos.get('symbol')} {pos.get('side')} "
-                    f"Entry {pos.get('entry_price', 0.0):.6f} | "
-                    f"Mark {pos.get('mark_price', 0.0):.6f} | "
-                    f"PnL {pnl:.4f} ({pnl_pct:.2f}%)"
-                )
-        if orders:
-            lines.append("🟡 Pending order-lar:")
-            for order in orders:
-                lines.append(
-                    f"• {order.get('symbol')} {order.get('side')} {order.get('type')} "
-                    f"Price {order.get('price', 0.0):.6f} "
-                    f"Qty {order.get('origQty', 0.0):.6f} "
-                    f"[{order.get('status')}]"
-                )
-        if not lines:
-            lines.append("Aktiv məlumat yoxdur.")
-        return "\n".join(lines)
-
-    def _update_monitor_display(self, payload: dict) -> None:
-        self.monitor_status_var.set(payload.get("status", "-"))
-        self.monitor_signal_var.set(payload.get("signal", "-"))
-        focus = payload.get("focus")
-        if not focus:
-            self.monitor_side_var.set("-")
-            self.monitor_entry_var.set("-")
-            self.monitor_mark_var.set("-")
-            self.monitor_pnl_var.set("-")
-            self.monitor_roi_var.set("-")
-            self.monitor_leverage_var.set("-")
-            self.monitor_liq_var.set("-")
-        else:
-            focus_type = focus.get("focus_type", "position")
-            self.monitor_side_var.set(focus.get("side", "-"))
-            if focus_type == "position":
-                pnl = float(focus.get("unrealized_profit", 0.0))
-                notional = abs(float(focus.get("notional", 0.0)))
-                pnl_pct = (pnl / notional * 100) if notional > 0 else 0.0
-                self.monitor_entry_var.set(f"{focus.get('entry_price', 0.0):.6f}")
-                self.monitor_mark_var.set(f"{focus.get('mark_price', 0.0):.6f}")
-                self.monitor_pnl_var.set(f"{pnl:.4f}")
-                self.monitor_roi_var.set(f"{pnl_pct:.2f}%")
-                self.monitor_leverage_var.set(f"{focus.get('leverage', '-')}")
-                liq_price = float(focus.get("liquidation_price", 0.0))
-                self.monitor_liq_var.set(f"{liq_price:.6f}" if liq_price > 0 else "-")
-            else:
-                entry_price = float(focus.get("price", 0.0))
-                stop_price = float(focus.get("stopPrice", 0.0))
-                self.monitor_entry_var.set(
-                    f"{entry_price:.6f}" if entry_price > 0 else f"{stop_price:.6f}"
-                )
-                self.monitor_mark_var.set("-")
-                self.monitor_pnl_var.set("-")
-                self.monitor_roi_var.set("-")
-                self.monitor_leverage_var.set("-")
-                self.monitor_liq_var.set("-")
-
-        self.active_monitor_text.configure(state="normal")
-        self.active_monitor_text.delete("1.0", "end")
-        self.active_monitor_text.insert("end", payload.get("summary", "-"))
-        self.active_monitor_text.configure(state="disabled")
+    def on_open_dashboard(self):
+        """Open specialized Deep Analysis Dashboard window."""
+        if self.dashboard_window is None or not self.dashboard_window.winfo_exists():
+            self.dashboard_window = DeepAnalysisWindow(self.root)
+            self.dashboard_window.protocol("WM_DELETE_WINDOW", self._on_dashboard_close)
+        self.dashboard_window.lift()
+        
+    def _on_dashboard_close(self):
+        if self.dashboard_window:
+            self.dashboard_window.destroy()
+            self.dashboard_window = None

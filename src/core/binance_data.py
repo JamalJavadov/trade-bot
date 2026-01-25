@@ -13,6 +13,8 @@ load_dotenv()
 API_KEY = os.getenv("BINANCE_API_KEY", "")
 API_SECRET = os.getenv("BINANCE_API_SECRET", "")
 
+print("DEBUG: Loading binance_data.py V2 with FIX")
+
 client = Client(API_KEY, API_SECRET)
 
 
@@ -209,11 +211,21 @@ def get_ohlcv(symbol: str, interval: str, limit: int = 500, sleep_ms: int = 0) -
 
     df = pd.DataFrame(kl, columns=cols)
 
-    for c in ["open", "high", "low", "close", "volume"]:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-
-    df["open_time"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
-    df["close_time"] = pd.to_datetime(df["close_time"], unit="ms", utc=True)
+    # 1. Convert numeric columns (coercing errors)
+    # We use a dictionary comprehension to process all numeric cols at once
+    numeric_cols = ["open", "high", "low", "close", "volume"]
+    numeric_data = {c: pd.to_numeric(df[c], errors="coerce") for c in numeric_cols}
+    
+    # 2. Convert time columns (explicitly handling units and timezone)
+    # We maintain the same column names but create new Series
+    time_data = {
+        "open_time": pd.to_datetime(df["open_time"], unit="ms", utc=True),
+        "close_time": pd.to_datetime(df["close_time"], unit="ms", utc=True)
+    }
+    
+    # 3. Assign all processed columns back to the DataFrame
+    # Using assign() returns a new object, avoiding ChainedAssignment and schema warnings
+    df = df.assign(**numeric_data, **time_data)
 
     df = df.dropna(subset=["open", "high", "low", "close"]).reset_index(drop=True)
     return df
@@ -657,3 +669,102 @@ def get_comprehensive_market_data(symbol: str) -> Dict[str, Any]:
         "bullishSignals": bullish_signals,
         "bearishSignals": bearish_signals,
     }
+
+
+def place_trade_setup(symbol: str, 
+                      side: str, 
+                      entry_price: float, 
+                      quantity: float, 
+                      tp_price: float, 
+                      sl_price: float,
+                      leverage: int = 1) -> Dict[str, Any]:
+    """
+    Executes a complete trade setup on Binance Futures.
+    
+    Sequence:
+    1. Set Leverage
+    2. Place LIMIT Entry Order
+    3. (Ideally) Place OCO or SL/TP orders attached.
+       Binance Futures API allows separating orders.
+       We will place standalone STOP_MARKET and TAKE_PROFIT_MARKET orders
+       linked to the position (reduceOnly=True).
+       
+    Args:
+        symbol: Trading pair (e.g. BTCUSDT)
+        side: "LONG" or "SHORT"
+        entry_price: Limit price for entry
+        quantity: Contract quantity
+        tp_price: Take profit price
+        sl_price: Stop loss price
+        leverage: Leverage to set
+        
+    Returns:
+        Dict with status and order IDs
+    """
+    results = {"status": "error", "logs": []}
+    
+    try:
+        # A. Set Leverage
+        try:
+            client.futures_change_leverage(symbol=symbol, leverage=leverage)
+            results["logs"].append(f"Leverage set to {leverage}x")
+        except Exception as e:
+            results["logs"].append(f"Warning: Failed to set leverage: {e}")
+
+        # B. Determine Sides
+        if side.upper() == "LONG":
+            entry_side = "BUY"
+            exit_side = "SELL"
+        else:
+            entry_side = "SELL"
+            exit_side = "BUY"
+            
+        # C. Place Entry Order (Limit)
+        # Note: quantity must be positive
+        entry_order = client.futures_create_order(
+            symbol=symbol,
+            side=entry_side,
+            type="LIMIT",
+            timeInForce="GTC",
+            quantity=abs(quantity),
+            price=entry_price
+        )
+        results["entry_id"] = entry_order.get("orderId")
+        results["logs"].append(f"Placed {entry_side} LIMIT at {entry_price}")
+        
+        # D. Place Protection Orders (Strategy)
+        # Since the position isn't open yet (it's a limit order), 
+        # placing simple STOP/TP orders works as triggers.
+        # Ideally, we use the batch orders endpoint if possible, but sequential is safer for now.
+        
+        # Stop Loss (STOP_MARKET)
+        # Reduce Only = True ensures we don't open new opposite positions
+        sl_order = client.futures_create_order(
+            symbol=symbol,
+            side=exit_side,
+            type="STOP_MARKET",
+            stopPrice=sl_price,
+            closePosition="true" # This implies quantities match the position, safer than specifying qty
+        )
+        results["sl_id"] = sl_order.get("orderId")
+        results["logs"].append(f"Placed SL {exit_side} at {sl_price}")
+        
+        # Take Profit (TAKE_PROFIT_MARKET)
+        tp_order = client.futures_create_order(
+            symbol=symbol,
+            side=exit_side,
+            type="TAKE_PROFIT_MARKET",
+            stopPrice=tp_price,
+            closePosition="true"
+        )
+        results["tp_id"] = tp_order.get("orderId")
+        results["logs"].append(f"Placed TP {exit_side} at {tp_price}")
+        
+        results["status"] = "success"
+        
+    except Exception as e:
+        results["status"] = "error"
+        results["error"] = str(e)
+        results["logs"].append(f"CRITICAL ERROR: {e}")
+        
+    return results
