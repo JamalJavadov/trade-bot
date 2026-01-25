@@ -6,11 +6,16 @@ deep analysis visualization widgets into a cohesive, professional interface.
 """
 from __future__ import annotations
 
-import threading
 import queue
+import threading
+import time
+from datetime import datetime, timezone
 import tkinter as tk
 from tkinter import ttk
-from typing import Any, Dict, List, Optional, Callable
+from typing import Any, Dict, List, Optional
+
+from ..core import binance_data
+from ..core.planner import load_settings
 
 from .deep_visualizations import (
     DeepStyle,
@@ -198,10 +203,69 @@ class DeepAnalysisDashboard(ttk.Frame):
         right_col = ttk.Frame(main_container, style="Deep.TFrame")
         right_col.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
         
+        self._create_binance_section(right_col)
         self._create_components_section(right_col)
         self._create_indicators_section(right_col)
         self._create_reasons_section(right_col)
-    
+
+    def _create_binance_section(self, parent):
+        """Create live Binance feed section."""
+        binance_card = ttk.LabelFrame(
+            parent,
+            text="📡 Binance Live Feed (1s)",
+            style="DeepCard.TLabelframe",
+            padding=10
+        )
+        binance_card.pack(fill="x", pady=5)
+
+        self.binance_status_var = tk.StringVar(value="Waiting for updates...")
+        self.binance_symbol_var = tk.StringVar(value="-")
+        self.binance_updates_var = tk.StringVar(value="0")
+        self.binance_last_update_var = tk.StringVar(value="-")
+        self.binance_server_time_var = tk.StringVar(value="-")
+        self.binance_latency_var = tk.StringVar(value="-")
+        self.binance_mark_price_var = tk.StringVar(value="-")
+        self.binance_funding_var = tk.StringVar(value="-")
+        self.binance_oi_var = tk.StringVar(value="-")
+        self.binance_order_pressure_var = tk.StringVar(value="-")
+        self.binance_taker_pressure_var = tk.StringVar(value="-")
+        self.binance_ls_ratio_var = tk.StringVar(value="-")
+        self.binance_sentiment_var = tk.StringVar(value="-")
+
+        rows = [
+            ("Status", self.binance_status_var),
+            ("Symbol", self.binance_symbol_var),
+            ("Updates", self.binance_updates_var),
+            ("Last Update", self.binance_last_update_var),
+            ("Server Time", self.binance_server_time_var),
+            ("Latency", self.binance_latency_var),
+            ("Mark Price", self.binance_mark_price_var),
+            ("Funding Rate", self.binance_funding_var),
+            ("Open Interest", self.binance_oi_var),
+            ("Order Book", self.binance_order_pressure_var),
+            ("Taker Flow", self.binance_taker_pressure_var),
+            ("Long/Short", self.binance_ls_ratio_var),
+            ("Sentiment", self.binance_sentiment_var),
+        ]
+
+        grid = ttk.Frame(binance_card, style="DeepCard.TFrame")
+        grid.pack(fill="x")
+
+        for idx, (label, var) in enumerate(rows):
+            row = idx // 2
+            col = (idx % 2) * 2
+            ttk.Label(grid, text=f"{label}:", style="DeepLabel.TLabel").grid(
+                row=row, column=col, sticky="w", padx=(0, 6), pady=2
+            )
+            ttk.Label(grid, textvariable=var, style="DeepLabel.TLabel").grid(
+                row=row, column=col + 1, sticky="w", padx=(0, 12), pady=2
+            )
+
+        grid.columnconfigure(0, weight=0)
+        grid.columnconfigure(1, weight=1)
+        grid.columnconfigure(2, weight=0)
+        grid.columnconfigure(3, weight=1)
+
     def _create_gauges_section(self, parent):
         """Create confidence gauges section."""
         gauges_card = ttk.LabelFrame(
@@ -399,9 +463,9 @@ class DeepAnalysisDashboard(ttk.Frame):
         # Update trade levels
         self.update_trade_levels(
             result.get("entry", 0.0),
-            result.get("sl", 0.0),
-            result.get("tp1", 0.0),
-            result.get("tp2", 0.0),
+            result.get("stop_loss", result.get("sl", 0.0)),
+            result.get("take_profit_1", result.get("tp1", 0.0)),
+            result.get("take_profit_2", result.get("tp2", 0.0)),
             result.get("side", "LONG"),
             result.get("entry", 0.0)
         )
@@ -429,6 +493,28 @@ class DeepAnalysisDashboard(ttk.Frame):
         self.complete_workflow()
         self.set_status("Analysis Complete")
 
+    def update_binance_live_data(self, payload: Dict[str, Any]) -> None:
+        """Update Binance live feed section."""
+        if payload.get("ok"):
+            self.binance_status_var.set("Connected ✓")
+            self.binance_symbol_var.set(payload.get("symbol", "-"))
+            self.binance_updates_var.set(str(payload.get("updates", 0)))
+            self.binance_last_update_var.set(payload.get("last_update", "-"))
+            self.binance_server_time_var.set(payload.get("server_time", "-"))
+            self.binance_latency_var.set(payload.get("latency", "-"))
+            self.binance_mark_price_var.set(payload.get("mark_price", "-"))
+            self.binance_funding_var.set(payload.get("funding_rate", "-"))
+            self.binance_oi_var.set(payload.get("open_interest", "-"))
+            self.binance_order_pressure_var.set(payload.get("order_book", "-"))
+            self.binance_taker_pressure_var.set(payload.get("taker_ratio", "-"))
+            self.binance_ls_ratio_var.set(payload.get("long_short_ratio", "-"))
+            self.binance_sentiment_var.set(payload.get("sentiment", "-"))
+            self.set_status("Binance Live ✓")
+        else:
+            error = payload.get("error", "Unknown error")
+            self.binance_status_var.set(f"Error: {error}")
+            self.set_status("Binance Error")
+
 
 class DeepAnalysisWindow(tk.Toplevel):
     """
@@ -437,18 +523,125 @@ class DeepAnalysisWindow(tk.Toplevel):
     Can be opened from the main GUI to show detailed analysis results.
     """
     
-    def __init__(self, parent, title: str = "Deep Analysis Dashboard"):
+    def __init__(
+        self,
+        parent,
+        title: str = "Deep Analysis Dashboard",
+        symbol: Optional[str] = None,
+        refresh_interval_s: float = 1.0,
+    ):
         super().__init__(parent)
         
         self.title(title)
         self.geometry("900x800")
         self.minsize(800, 600)
         self.configure(bg=DeepStyle.BG_DARK)
+
+        self._live_symbol = self._resolve_symbol(symbol)
+        self._refresh_interval_s = max(1.0, refresh_interval_s)
+        self._live_queue: queue.Queue[Dict[str, Any]] = queue.Queue()
+        self._live_stop = threading.Event()
+        self._live_updates = 0
         
         # Create dashboard
         self.dashboard = DeepAnalysisDashboard(self)
         self.dashboard.pack(fill="both", expand=True)
-    
+
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._start_live_updates()
+
     def update_from_result(self, result: Dict[str, Any]) -> None:
         """Update dashboard with analysis result."""
         self.dashboard.update_from_analysis_result(result)
+
+    def _resolve_symbol(self, symbol: Optional[str]) -> str:
+        if symbol:
+            return symbol.upper()
+        settings = load_settings("settings.json")
+        sym_cfg = settings.get("symbols", {})
+        symbols = sym_cfg.get("list") or sym_cfg.get("default") or []
+        if symbols:
+            return str(symbols[0]).upper()
+        return "BTCUSDT"
+
+    def _start_live_updates(self) -> None:
+        self.dashboard.update_binance_live_data(
+            {"ok": True, "symbol": self._live_symbol, "updates": 0}
+        )
+        self._live_thread = threading.Thread(
+            target=self._live_worker,
+            name="binance-live-feed",
+            daemon=True,
+        )
+        self._live_thread.start()
+        self.after(200, self._drain_live_queue)
+
+    def _live_worker(self) -> None:
+        while not self._live_stop.is_set():
+            start = time.perf_counter()
+            try:
+                market_data = binance_data.get_comprehensive_market_data(self._live_symbol)
+                server_time = binance_data.server_time()
+                latency_ms = (time.perf_counter() - start) * 1000.0
+                self._live_updates += 1
+                payload = self._format_live_payload(
+                    market_data,
+                    server_time,
+                    latency_ms,
+                    self._live_updates,
+                )
+            except Exception as exc:
+                payload = {"ok": False, "error": str(exc)}
+            self._live_queue.put(payload)
+            self._live_stop.wait(self._refresh_interval_s)
+
+    def _format_live_payload(
+        self,
+        market_data: Dict[str, Any],
+        server_time: Dict[str, Any],
+        latency_ms: float,
+        updates: int,
+    ) -> Dict[str, Any]:
+        mark_price = market_data.get("markPrice", {})
+        funding = market_data.get("funding", {})
+        open_interest = market_data.get("openInterest", {})
+        order_book = market_data.get("orderBook", {})
+        taker_ratio = market_data.get("takerRatio", {})
+        long_short = market_data.get("longShortRatio", {})
+        server_ts = server_time.get("serverTime")
+        if server_ts:
+            server_dt = datetime.fromtimestamp(server_ts / 1000, tz=timezone.utc)
+            server_time_str = server_dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+        else:
+            server_time_str = "-"
+        return {
+            "ok": True,
+            "symbol": market_data.get("symbol", self._live_symbol),
+            "updates": updates,
+            "last_update": datetime.now().strftime("%H:%M:%S"),
+            "server_time": server_time_str,
+            "latency": f"{latency_ms:.0f} ms",
+            "mark_price": f"{mark_price.get('markPrice', 0.0):.4f}",
+            "funding_rate": f"{funding.get('fundingRatePct', 0.0):.4f}%",
+            "open_interest": f"{open_interest.get('openInterest', 0.0):,.2f}",
+            "order_book": order_book.get("pressure", "UNKNOWN"),
+            "taker_ratio": taker_ratio.get("pressure", "UNKNOWN"),
+            "long_short_ratio": f"{long_short.get('longShortRatio', 0.0):.2f}",
+            "sentiment": market_data.get("overallSentiment", "UNKNOWN"),
+        }
+
+    def _drain_live_queue(self) -> None:
+        try:
+            while True:
+                payload = self._live_queue.get_nowait()
+                if payload.get("ok"):
+                    payload.setdefault("symbol", self._live_symbol)
+                self.dashboard.update_binance_live_data(payload)
+        except queue.Empty:
+            pass
+        if not self._live_stop.is_set():
+            self.after(200, self._drain_live_queue)
+
+    def _on_close(self) -> None:
+        self._live_stop.set()
+        self.destroy()
