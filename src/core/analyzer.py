@@ -366,13 +366,29 @@ def _rejection_wick(df: pd.DataFrame, side: str, zone_low: float, zone_high: flo
     return bool(wick_through and close_back and c["close"] < c["open"])
 
 
-def _golden_respect(df: pd.DataFrame, side: str, zone_low: float, zone_high: float, tol: float) -> bool:
+def _golden_respect(
+    df: pd.DataFrame,
+    side: str,
+    zone_low: float,
+    zone_high: float,
+    tol: float,
+    atr: float,
+    body_atr_ratio: float,
+) -> bool:
     recent = df.tail(3)
     if recent.empty:
         return False
     if side == "LONG":
-        return bool((recent["close"] >= zone_low - tol).all())
-    return bool((recent["close"] <= zone_high + tol).all())
+        closes_ok = (recent["close"] >= zone_low - tol).all()
+        wicks_ok = (recent["low"] <= zone_high + tol).any()
+    else:
+        closes_ok = (recent["close"] <= zone_high + tol).all()
+        wicks_ok = (recent["high"] >= zone_low - tol).any()
+    body_ok = True
+    if np.isfinite(atr) and atr > 0:
+        avg_body = (recent["close"] - recent["open"]).abs().mean()
+        body_ok = avg_body <= atr * body_atr_ratio
+    return bool(closes_ok and wicks_ok and body_ok)
 
 
 def _liquidity_sweep(df: pd.DataFrame, side: str) -> Optional[int]:
@@ -441,7 +457,7 @@ def _build_golden_zone_setup(
         return None
 
     start_idx, end_idx, a, b = leg
-    zone_mode = str(cfg.get("fib_zone_mode", "auto")).lower()
+    zone_mode = str(cfg.get("fib_zone_mode", "golden")).lower()
     zone_label = "Golden zone"
     strong_trend = _is_strong_trend(
         df1,
@@ -451,18 +467,9 @@ def _build_golden_zone_setup(
         float(cfg.get("strong_trend_slope_atr", 0.12)),
         float(cfg.get("strong_trend_ema_separation_atr", 0.3)),
     )
-    if zone_mode == "auto":
-        zone_mode = "strong_trend" if strong_trend else "beginner"
-
-    if zone_mode == "strong_trend":
-        zone_label = "Strong trend zone"
-        low_lvl, high_lvl = 0.5, 0.382
-    elif zone_mode == "beginner":
-        zone_label = "Beginner zone"
-        low_lvl, high_lvl = 0.618, 0.382
-    else:
-        zone_label = "Golden zone"
-        low_lvl, high_lvl = 0.618, 0.5
+    low_lvl, high_lvl = 0.618, 0.5
+    if zone_mode not in ("golden", "golden_zone"):
+        zone_mode = "golden"
 
     if side == "LONG":
         lo, hi = a, b
@@ -508,24 +515,20 @@ def _build_golden_zone_setup(
             if _bullish_engulfing(df_confirm):
                 confirmation = True
                 confirmation_pattern = "bullish_engulfing"
-            elif _morning_star(df_confirm):
-                confirmation = True
-                confirmation_pattern = "morning_star"
-            elif _rejection_wick(df_confirm, "LONG", z_low, z_high):
-                confirmation = True
-                confirmation_pattern = "rejection_wick"
         else:
             if _bearish_engulfing(df_confirm):
                 confirmation = True
                 confirmation_pattern = "bearish_engulfing"
-            elif _evening_star(df_confirm):
-                confirmation = True
-                confirmation_pattern = "evening_star"
-            elif _rejection_wick(df_confirm, "SHORT", z_low, z_high):
-                confirmation = True
-                confirmation_pattern = "rejection_wick"
         if confirmation:
-            confirmation = _golden_respect(df_confirm, side, z_low, z_high, tol)
+            confirmation = _golden_respect(
+                df_confirm,
+                side,
+                z_low,
+                z_high,
+                tol,
+                atr,
+                float(cfg.get("respect_body_atr_ratio", 0.6)),
+            )
             if not confirmation:
                 confirmation_pattern = None
 
