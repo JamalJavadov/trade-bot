@@ -2056,6 +2056,11 @@ Bu real əməliyyatdır! Davam edilsin?"""
                     self.monitor_status_var.set(f"Monitor xətası: {err}")
                     self.monitor_signal_var.set("⚠️ API problem")
 
+                elif kind == "monitor_update_clear":
+                    if self.dashboard_window and self.dashboard_window.winfo_exists():
+                        self.dashboard_window.dashboard.clear()
+                    self.compact_status_var.set("Status: Idle (No Activity)")
+
                 elif kind == "position_analysis_update":
                     _, payload = msg
                     self._handle_position_update(payload)
@@ -2365,6 +2370,8 @@ Bu real əməliyyatdır! Davam edilsin?"""
             
             # Prepare dashboard data
             dash_data = {
+                "symbol": symbol,
+                "type": payload.get("type", "UNKNOWN"), # POSITION or ORDER
                 "confidence": res.confidence,
                 "quality_score": res.quality_score,
                 "signal": res.signal,

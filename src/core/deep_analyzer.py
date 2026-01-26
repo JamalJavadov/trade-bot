@@ -579,11 +579,29 @@ def perform_deep_analysis(
     
     rr1 = _calculate_rr(entry, sl, tp1)
     rr2 = _calculate_rr(entry, sl, tp2)
-    
+
+    # Enforce strict 3:1 RR if enabled
+    risk_cfg = settings.get("risk", {})
+    enforce_strict = bool(risk_cfg.get("enforce_strict_rr", False))
+    rr_buffer = float(risk_cfg.get("rr_buffer_pct", 1.0))
+    if enforce_strict and side in ("LONG", "SHORT"):
+        risk_dist = abs(entry - sl)
+        if risk_dist > 0:
+            direction = 1 if side == "LONG" else -1
+            target_rr = 3.0 * rr_buffer
+            tp2 = float(entry + direction * (risk_dist * target_rr))
+            rr2 = _calculate_rr(entry, sl, tp2)
+            # Adjust TP1 to 1:1 if it was further
+            if _calculate_rr(entry, sl, tp1) > 1.0:
+                tp1 = float(entry + direction * risk_dist)
+                rr1 = 1.0
+
     # 8. Generate reasons and warnings
     reasons, warnings = _generate_reasons(
         side, indicators, market_structure, volume_analysis, mtf_alignment, market_data
     )
+    if enforce_strict and side in ("LONG", "SHORT"):
+        reasons.append(f"Strict 3:1 RR applied (buffer={rr_buffer})")
     
     # Calculate quality score (similar to confidence but with RR factor)
     quality_score = confidence

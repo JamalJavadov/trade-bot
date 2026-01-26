@@ -871,6 +871,25 @@ def analyze_symbol(
             )
 
     last_close = float(df_impulse["close"].iloc[-1])
+
+    # Enforce strict 3:1 RR if enabled
+    enforce_strict = bool(risk_cfg.get("enforce_strict_rr", False))
+    rr_buffer = float(risk_cfg.get("rr_buffer_pct", 1.0))
+    if enforce_strict and best.side in ("LONG", "SHORT"):
+        risk_dist = abs(best.entry - best.sl)
+        if risk_dist > 0:
+            direction = 1 if best.side == "LONG" else -1
+            # Recalculate TP2 based on 3x risk * buffer
+            target_rr = 3.0 * rr_buffer
+            best.tp2 = float(best.entry + direction * (risk_dist * target_rr))
+            # Recalculate RR2
+            best.rr2 = float(abs(best.tp2 - best.entry) / risk_dist)
+            # Also adjust TP1 to 1:1 if it was further
+            if abs(best.tp1 - best.entry) / risk_dist > 1.0:
+                best.tp1 = float(best.entry + direction * risk_dist)
+                best.rr1 = 1.0
+            best.reason = f"{best.reason} | Strict 3:1 RR applied (buf={rr_buffer})"
+
     dist_atr = abs(last_close - best.entry) / atr1
     penalty = 1.0
     if dist_atr > max_entry_atr:

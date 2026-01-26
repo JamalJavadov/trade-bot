@@ -332,10 +332,12 @@ def get_open_interest_history(symbol: str, period: str = "5m", limit: int = 100)
     try:
         data = client.futures_open_interest_hist(symbol=symbol, period=period, limit=limit)
         if data:
-            df = pd.DataFrame(data)
-            df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
-            df["sumOpenInterest"] = pd.to_numeric(df["sumOpenInterest"], errors="coerce")
-            df["sumOpenInterestValue"] = pd.to_numeric(df["sumOpenInterestValue"], errors="coerce")
+            df = pd.DataFrame(data).copy()
+            df = df.assign(
+                timestamp=pd.to_datetime(df["timestamp"], unit="ms", utc=True),
+                sumOpenInterest=pd.to_numeric(df["sumOpenInterest"], errors="coerce"),
+                sumOpenInterestValue=pd.to_numeric(df["sumOpenInterestValue"], errors="coerce")
+            )
             return df
     except Exception as e:
         pass
@@ -492,12 +494,14 @@ def get_recent_trades(symbol: str, limit: int = 500) -> pd.DataFrame:
     try:
         data = client.futures_recent_trades(symbol=symbol, limit=limit)
         if data:
-            df = pd.DataFrame(data)
-            df["price"] = pd.to_numeric(df["price"], errors="coerce")
-            df["qty"] = pd.to_numeric(df["qty"], errors="coerce")
-            df["quoteQty"] = pd.to_numeric(df["quoteQty"], errors="coerce")
-            df["time"] = pd.to_datetime(df["time"], unit="ms", utc=True)
-            df["isBuyerMaker"] = df["isBuyerMaker"].astype(bool)
+            df = pd.DataFrame(data).copy()
+            df = df.assign(
+                price=pd.to_numeric(df["price"], errors="coerce"),
+                qty=pd.to_numeric(df["qty"], errors="coerce"),
+                quoteQty=pd.to_numeric(df["quoteQty"], errors="coerce"),
+                time=pd.to_datetime(df["time"], unit="ms", utc=True),
+                isBuyerMaker=lambda x: x["isBuyerMaker"].astype(bool)
+            )
             return df
     except Exception as e:
         pass
@@ -524,10 +528,12 @@ def get_long_short_ratio(symbol: str, period: str = "5m", limit: int = 30) -> Di
     try:
         data = client.futures_top_longshort_position_ratio(symbol=symbol, period=period, limit=limit)
         if data:
-            df = pd.DataFrame(data)
-            df["longShortRatio"] = pd.to_numeric(df["longShortRatio"], errors="coerce")
-            df["longAccount"] = pd.to_numeric(df["longAccount"], errors="coerce")
-            df["shortAccount"] = pd.to_numeric(df["shortAccount"], errors="coerce")
+            df = pd.DataFrame(data).copy()
+            df = df.assign(
+                longShortRatio=pd.to_numeric(df["longShortRatio"], errors="coerce"),
+                longAccount=pd.to_numeric(df["longAccount"], errors="coerce"),
+                shortAccount=pd.to_numeric(df["shortAccount"], errors="coerce")
+            )
             
             current = df.iloc[-1] if not df.empty else None
             
@@ -573,10 +579,13 @@ def get_taker_buy_sell_ratio(symbol: str, period: str = "5m", limit: int = 30) -
     try:
         data = client.futures_taker_long_short_ratio(symbol=symbol, period=period, limit=limit)
         if data:
-            df = pd.DataFrame(data)
-            df["buySellRatio"] = pd.to_numeric(df["buySellRatio"], errors="coerce")
-            df["buyVol"] = pd.to_numeric(df["buyVol"], errors="coerce")
-            df["sellVol"] = pd.to_numeric(df["sellVol"], errors="coerce")
+            df = pd.DataFrame(data).copy()
+            # Use assign to avoid ChainedAssignmentError in current and future pandas
+            df = df.assign(
+                buySellRatio=pd.to_numeric(df["buySellRatio"], errors="coerce"),
+                buyVol=pd.to_numeric(df["buyVol"], errors="coerce"),
+                sellVol=pd.to_numeric(df["sellVol"], errors="coerce")
+            )
             
             current = df.iloc[-1] if not df.empty else None
             

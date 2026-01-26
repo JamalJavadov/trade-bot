@@ -49,6 +49,11 @@ class DeepAnalysisDashboard(ttk.Frame):
         super().__init__(parent, **kwargs)
         
         self.configure(style="Dark.TFrame")
+        
+        # State for multi-asset monitoring
+        self.all_results: Dict[str, Dict[str, Any]] = {}
+        self.selected_symbol: Optional[str] = None
+        
         self._setup_styles()
         self._create_widgets()
     
@@ -96,31 +101,263 @@ class DeepAnalysisDashboard(ttk.Frame):
     
     def _create_widgets(self):
         """Create all dashboard widgets."""
-        # Main container with scroll
+        # Main layout: Sidebar + Detail area
+        self.main_paned = tk.PanedWindow(
+            self,
+            orient="horizontal",
+            bg=DeepStyle.BG_DARK,
+            sashwidth=4,
+            sashpad=2,
+            bd=0
+        )
+        self.main_paned.pack(fill="both", expand=True)
+        
+        # Sidebar for asset list
+        self._create_sidebar()
+        
+        # Detail area with scroll
+        self.detail_container = ttk.Frame(self.main_paned, style="Deep.TFrame")
+        self.main_paned.add(self.detail_container, stretch="always")
+        
         self._create_scroll_container()
         
-        # Header
+        # Header (In detail area)
         self._create_header()
         
         # Workflow progress
         self._create_workflow_section()
         
-        # Main content in two columns
+        # Main content in columns
         self._create_main_content()
         
         # Threading metrics footer
         self._create_metrics_footer()
+
+    def _create_sidebar(self):
+        """Create sidebar for asset selection."""
+        self.sidebar_frame = ttk.Frame(self.main_paned, style="Deep.TFrame", width=180)
+        self.main_paned.add(self.sidebar_frame, minsize=160)
+        
+        ttk.Label(
+            self.sidebar_frame,
+            text="📁 ASSETS",
+            style="DeepLabel.TLabel",
+            foreground=DeepStyle.ACCENT_PRIMARY,
+            font=DeepStyle.FONT_HEADER
+        ).pack(fill="x", padx=10, pady=(15, 10))
+        
+        # Scrollable list of cards
+        self.side_canvas = tk.Canvas(
+            self.sidebar_frame,
+            bg=DeepStyle.BG_DARK,
+            highlightthickness=0,
+            bd=0
+        )
+        self.side_scroll = ttk.Scrollbar(
+            self.sidebar_frame,
+            orient="vertical",
+            command=self.side_canvas.yview
+        )
+        self.side_canvas.configure(yscrollcommand=self.side_scroll.set)
+        
+        self.side_scroll.pack(side="right", fill="y")
+        self.side_canvas.pack(side="left", fill="both", expand=True)
+        
+        self.asset_list_frame = ttk.Frame(self.side_canvas, style="Deep.TFrame")
+        self.side_canvas_window = self.side_canvas.create_window(
+            (0, 0), window=self.asset_list_frame, anchor="nw"
+        )
+        
+        self.asset_list_frame.bind(
+            "<Configure>",
+            lambda e: self.side_canvas.configure(scrollregion=self.side_canvas.bbox("all"))
+        )
+        self.side_canvas.bind(
+            "<Configure>",
+            lambda e: self.side_canvas.itemconfigure(self.side_canvas_window, width=e.width)
+        )
+
+    def _update_sidebar(self):
+        """Update the list of monitored assets."""
+        for widget in self.asset_list_frame.winfo_children():
+            widget.destroy()
+            
+        if not self.all_results:
+            ttk.Label(
+                self.asset_list_frame,
+                text="No assets found",
+                style="DeepLabel.TLabel",
+                foreground=DeepStyle.TEXT_MUTED
+            ).pack(pady=20)
+            return
+            
+        for symbol, result in self.all_results.items():
+            self._create_asset_card(symbol, result)
+
+    def _create_asset_card(self, symbol: str, result: Dict[str, Any]):
+        """Create a clickable card for an asset in the sidebar."""
+        is_selected = (symbol == self.selected_symbol)
+        bg_color = DeepStyle.BG_LIGHT if is_selected else DeepStyle.BG_MEDIUM
+        border_color = DeepStyle.ACCENT_PRIMARY if is_selected else DeepStyle.BORDER
+        
+        card = tk.Frame(
+            self.asset_list_frame,
+            bg=bg_color,
+            highlightthickness=1,
+            highlightbackground=border_color,
+            padx=8,
+            pady=8,
+            cursor="hand2"
+        )
+        card.pack(fill="x", padx=5, pady=2)
+        
+        # PnL / Type indicator
+        item_type = result.get("type", "UNK")
+        type_color = DeepStyle.ACCENT_SUCCESS if item_type == "POSITION" else DeepStyle.ACCENT_INFO
+        
+        tk.Label(
+            card,
+            text=f"● {item_type}",
+            bg=bg_color,
+            fg=type_color,
+            font=("Segoe UI", 8, "bold")
+        ).pack(anchor="w")
+        
+        tk.Label(
+            card,
+            text=symbol,
+            bg=bg_color,
+            fg=DeepStyle.TEXT_PRIMARY,
+            font=DeepStyle.FONT_HEADER
+        ).pack(anchor="w")
+        
+        # Health / Confidence
+        conf = result.get("confidence", 0.0)
+        tk.Label(
+            card,
+            text=f"Health: {conf:.1f}%",
+            bg=bg_color,
+            fg=DeepStyle.ACCENT_SUCCESS if conf > 70 else DeepStyle.TEXT_SECONDARY,
+            font=("Segoe UI", 9)
+        ).pack(anchor="w")
+        
+        # Click binding
+        for widget in [card] + list(card.winfo_children()):
+            widget.bind("<Button-1>", lambda e, s=symbol: self._on_asset_click(s))
+
+    def _on_asset_click(self, symbol: str):
+        """Handle asset selection."""
+        self.selected_symbol = symbol
+        self._update_sidebar()
+        
+        # Trigger parent window update if exists (to change live feed)
+        parent_window = self.master
+        while parent_window and not isinstance(parent_window, tk.Toplevel):
+            parent_window = parent_window.master
+            
+        if parent_window and hasattr(parent_window, "set_live_symbol"):
+            parent_window.set_live_symbol(symbol)
+            
+        # Refresh widgets from cache
+        if symbol in self.all_results:
+            self._refresh_widgets_from_data(self.all_results[symbol])
+
+    def _refresh_widgets_from_data(self, result: Dict[str, Any]):
+        """Populate all widgets with data from a specific result."""
+        # This is essentially the core logic currently in update_from_analysis_result
+        # Update confidence
+        self.update_confidence(
+            result.get("confidence", 0.0),
+            result.get("quality_score", 0.0)
+        )
+        
+        # Update signal
+        self.update_signal(
+            result.get("signal", "NEUTRAL"),
+            result.get("confidence", 0.0),
+            result.get("side", "NONE")
+        )
+        
+        # Update Action Recommendation
+        sig = result.get("signal", "NEUTRAL")
+        conf = result.get("confidence", 0.0)
+        
+        action_text = "⚠️ WAIT / MONITOR"
+        action_color = DeepStyle.TEXT_SECONDARY
+        
+        if sig == "STRONG_BUY":
+            action_text = "🚀 ENTER LONG (AGRESSIVE)" if conf > 80 else "✅ ENTER LONG (CONFIRMED)"
+            action_color = DeepStyle.ACCENT_SUCCESS
+        elif sig == "BUY":
+            action_text = "✅ ENTER LONG (WAIT CONFIRMATION)"
+            action_color = DeepStyle.ACCENT_SUCCESS
+        elif sig == "STRONG_SELL":
+            action_text = "🚀 ENTER SHORT (AGRESSIVE)" if conf > 80 else "✅ ENTER SHORT (CONFIRMED)"
+            action_color = DeepStyle.ACCENT_ERROR
+        elif sig == "SELL":
+            action_text = "✅ ENTER SHORT (WAIT CONFIRMATION)"
+            action_color = DeepStyle.ACCENT_ERROR
+            
+        self.action_label.configure(text=action_text, foreground=action_color)
+        
+        # Update components
+        components = [
+            ("Indicators", result.get("indicator_score", 0.0) * 100, "📈"),
+            ("Structure", result.get("structure_score", 0.0) * 100, "🏗️"),
+            ("Volume", result.get("volume_score", 0.0) * 100, "📊"),
+            ("MTF", result.get("mtf_score", 0.0) * 100, "🔄"),
+            ("Market", result.get("market_data_score", 0.0) * 100, "📡"),
+        ]
+        self.update_components(components)
+        
+        # Update trade levels
+        self.update_trade_levels(
+            result.get("entry", 0.0),
+            result.get("stop_loss", result.get("sl", 0.0)),
+            result.get("take_profit_1", result.get("tp1", 0.0)),
+            result.get("take_profit_2", result.get("tp2", 0.0)),
+            result.get("side", "LONG"),
+            result.get("entry", 0.0)
+        )
+        
+        # Update indicators
+        if "indicators" in result and result["indicators"]:
+            indicator_data = []
+            for name, ind in result["indicators"].items():
+                if hasattr(ind, "signal") and hasattr(ind, "strength"):
+                    indicator_data.append({
+                        "name": name,
+                        "signal": ind.signal,
+                        "strength": ind.strength
+                    })
+            if indicator_data:
+                self.update_indicators(indicator_data)
+        
+        # Update reasons
+        self.update_reasons(
+            result.get("reasons", []),
+            result.get("warnings", [])
+        )
+        
+        # Update Context Label
+        item_type = result.get("type", "UNKNOWN")
+        symbol = result.get("symbol", "NONE")
+        self.context_var.set(f"{item_type}: {symbol}")
+        
+        # Workflow
+        self.complete_workflow()
+        self.set_status("Analysis Complete")
     
     def _create_scroll_container(self):
         """Create scrollable container."""
         self.canvas = tk.Canvas(
-            self,
+            self.detail_container,
             bg=DeepStyle.BG_DARK,
             highlightthickness=0,
             bd=0
         )
         self.scrollbar = ttk.Scrollbar(
-            self,
+            self.detail_container,
             orient="vertical",
             command=self.canvas.yview
         )
@@ -162,12 +399,23 @@ class DeepAnalysisDashboard(ttk.Frame):
         ).pack(side="left")
         
         # Status indicator
+        status_container = ttk.Frame(header, style="Deep.TFrame")
+        status_container.pack(side="right")
+        
+        self.context_var = tk.StringVar(value="CONTEXT: NONE")
+        ttk.Label(
+            status_container,
+            textvariable=self.context_var,
+            style="DeepLabel.TLabel",
+            foreground=DeepStyle.ACCENT_PRIMARY
+        ).pack(side="left", padx=10)
+        
         self.status_label = ttk.Label(
-            header,
+            status_container,
             text="Ready",
             style="DeepLabel.TLabel"
         )
-        self.status_label.pack(side="right", padx=10)
+        self.status_label.pack(side="left", padx=10)
     
     def _create_workflow_section(self):
         """Create workflow progress section."""
@@ -449,87 +697,38 @@ class DeepAnalysisDashboard(ttk.Frame):
     def update_from_analysis_result(self, result: Dict[str, Any]) -> None:
         """
         Update entire dashboard from analysis result.
-        
-        Args:
-            result: Deep analysis result dictionary
+        Now supports multi-asset caching.
         """
-        # Update confidence
-        self.update_confidence(
-            result.get("confidence", 0.0),
-            result.get("quality_score", 0.0)
-        )
-        
-        # Update signal
-        self.update_signal(
-            result.get("signal", "NEUTRAL"),
-            result.get("confidence", 0.0),
-            result.get("side", "NONE")
-        )
-        
-        # Update Action Recommendation
-        sig = result.get("signal", "NEUTRAL")
-        conf = result.get("confidence", 0.0)
-        
-        action_text = "⚠️ WAIT / MONITOR"
-        action_color = DeepStyle.TEXT_SECONDARY
-        
-        if sig == "STRONG_BUY":
-            action_text = "🚀 ENTER LONG (AGRESSIVE)" if conf > 80 else "✅ ENTER LONG (CONFIRMED)"
-            action_color = DeepStyle.ACCENT_SUCCESS
-        elif sig == "BUY":
-            action_text = "✅ ENTER LONG (WAIT CONFIRMATION)"
-            action_color = DeepStyle.ACCENT_SUCCESS
-        elif sig == "STRONG_SELL":
-            action_text = "🚀 ENTER SHORT (AGRESSIVE)" if conf > 80 else "✅ ENTER SHORT (CONFIRMED)"
-            action_color = DeepStyle.ACCENT_ERROR
-        elif sig == "SELL":
-            action_text = "✅ ENTER SHORT (WAIT CONFIRMATION)"
-            action_color = DeepStyle.ACCENT_ERROR
+        symbol = result.get("symbol")
+        print(f"DEBUG Dashboard: Received result for {symbol}")
+        if not symbol:
+            return
             
-        self.action_label.configure(text=action_text, foreground=action_color)
+        # Cache the result
+        self.all_results[symbol] = result
         
-        # Update components
-        components = [
-            ("Indicators", result.get("indicator_score", 0.0) * 100, "📈"),
-            ("Structure", result.get("structure_score", 0.0) * 100, "🏗️"),
-            ("Volume", result.get("volume_score", 0.0) * 100, "📊"),
-            ("MTF", result.get("mtf_score", 0.0) * 100, "🔄"),
-            ("Market", result.get("market_data_score", 0.0) * 100, "📡"),
-        ]
-        self.update_components(components)
+        # If none selected, select this one
+        if self.selected_symbol is None:
+            self.selected_symbol = symbol
+            
+        # Update sidebar regardless
+        self._update_sidebar()
         
-        # Update trade levels
-        self.update_trade_levels(
-            result.get("entry", 0.0),
-            result.get("stop_loss", result.get("sl", 0.0)),
-            result.get("take_profit_1", result.get("tp1", 0.0)),
-            result.get("take_profit_2", result.get("tp2", 0.0)),
-            result.get("side", "LONG"),
-            result.get("entry", 0.0)
-        )
+        # If this is active symbol, refresh widgets
+        if symbol == self.selected_symbol:
+            self._refresh_widgets_from_data(result)
         
-        # Update indicators (if available)
-        if "indicators" in result and result["indicators"]:
-            indicator_data = []
-            for name, ind in result["indicators"].items():
-                if hasattr(ind, "signal") and hasattr(ind, "strength"):
-                    indicator_data.append({
-                        "name": name,
-                        "signal": ind.signal,
-                        "strength": ind.strength
-                    })
-            if indicator_data:
-                self.update_indicators(indicator_data)
-        
-        # Update reasons
-        self.update_reasons(
-            result.get("reasons", []),
-            result.get("warnings", [])
-        )
-        
-        # Complete workflow
-        self.complete_workflow()
-        self.set_status("Analysis Complete")
+    def clear(self) -> None:
+        """Clear the dashboard."""
+        self.all_results.clear()
+        self.selected_symbol = None
+        self._update_sidebar()
+        self.context_var.set("CONTEXT: NONE")
+        self.set_status("Idle (No Account Activity)")
+        self.reset_workflow()
+        self.update_confidence(0, 0)
+        # Clear other vars if needed
+        self.action_label.configure(text="NO ACTIVE MONITOR", foreground=DeepStyle.TEXT_MUTED)
 
     def update_binance_live_data(self, payload: Dict[str, Any]) -> None:
         """Update Binance live feed section."""
@@ -592,6 +791,15 @@ class DeepAnalysisWindow(tk.Toplevel):
         """Update dashboard with analysis result."""
         self.dashboard.update_from_analysis_result(result)
 
+    def set_live_symbol(self, symbol: str) -> None:
+        """Update the active symbol for the live Binance feed."""
+        if symbol.upper() == self._live_symbol:
+            return
+        
+        self._live_symbol = symbol.upper()
+        self._live_updates = 0 # Reset counter for new symbol
+        self.dashboard.binance_status_var.set(f"Switching to {self._live_symbol}...")
+        
     def _resolve_symbol(self, symbol: Optional[str]) -> str:
         if symbol:
             return symbol.upper()

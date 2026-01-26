@@ -66,28 +66,41 @@ class PositionMonitor:
         """Main loop for monitoring positions."""
         while not self.stop_event.is_set():
             try:
-                # 1. Fetch Active Positions
+                # 1. Fetch Active Positions & Open Orders
                 positions = binance_data.get_open_positions()
+                orders = binance_data.get_open_orders()
+                
                 self.active_positions = positions
                 
-                if not positions:
-                    self.queue.put(("monitor_status", "No active positions"))
-                    time.sleep(5)
+                if not positions and not orders:
+                    self.queue.put(("monitor_status", "No active positions or open orders"))
+                    self.queue.put(("monitor_update_clear", {})) # Clear dashboard if empty
+                    time.sleep(10)
                     continue
                     
-                self.queue.put(("monitor_status", f"Monitoring {len(positions)} active positions..."))
+                self.queue.put(("monitor_status", f"Monitoring {len(positions)} positions & {len(orders)} orders..."))
+                print(f"DEBUG: Monitoring Positions: {[p['symbol'] for p in positions]}")
+                print(f"DEBUG: Monitoring Orders: {[o['symbol'] for o in orders]}")
                 
-                # 2. Analyze each position in parallel
+                # 2. Analyze each in parallel
                 futures = []
+                
+                # Positions
                 for pos in positions:
                     symbol = pos.get("symbol")
                     if symbol:
-                        futures.append(self.executor.submit(self._analyze_position_task, symbol, pos))
+                        futures.append(self.executor.submit(self._analyze_position_task, symbol, pos, "POSITION"))
                 
-                # Wait for all to complete (or just let them run)
-                # For UI responsiveness, we let them emit their own results as they finish
+                # Orders
+                for ord in orders:
+                    symbol = ord.get("symbol")
+                    if symbol:
+                        # Skip if we already analyze this coin via Position (to avoid redundancy)
+                        if any(p.get("symbol") == symbol for p in positions):
+                            continue
+                        futures.append(self.executor.submit(self._analyze_position_task, symbol, ord, "ORDER"))
                 
-                # 3. Sleep until next cycle
+                # Wait for next cycle
                 for _ in range(self.refresh_interval):
                     if self.stop_event.is_set():
                         break
@@ -97,26 +110,24 @@ class PositionMonitor:
                 self.queue.put(("monitor_error", str(e)))
                 time.sleep(10)
                 
-    def _analyze_position_task(self, symbol: str, position_data: Dict[str, Any]):
-        """Worker task to analyze a single position."""
+    def _analyze_position_task(self, symbol: str, data: Dict[str, Any], type: str):
+        """Worker task to analyze a single account item (Position or Order)."""
         start_time = time.time()
         try:
             # A. Deep Technical Analysis
-            # We need a fetch_ohlcv wrapper that matches deep_analyzer's expected signature
             analysis_result = deep_analyzer.perform_deep_analysis(
                 symbol=symbol,
                 fetch_ohlcv=binance_data.get_ohlcv,
                 settings=self.settings,
-                on_stage=None # No fine-grained progress needed for background monitor
+                on_stage=None
             )
             
-            # B. News Analysis (Specific to this coin)
-            # We filter news by symbol name (e.g. "BTC", "ETH")
+            # B. News Analysis
             base_asset = symbol.replace("USDT", "")
             news_items = self._fetch_relevant_news(base_asset)
             
             # C. Synthesize "Health Score"
-            health_score, health_reason = self._calculate_health(analysis_result, news_items, position_data)
+            health_score, health_reason = self._calculate_health(analysis_result, news_items, data, type)
             
             elapsed = time.time() - start_time
             self.tasks_completed += 1
@@ -126,7 +137,8 @@ class PositionMonitor:
             # D. Package Result
             result_payload = {
                 "symbol": symbol,
-                "position": position_data,
+                "type": type,
+                "data": data,
                 "deep_analysis": analysis_result,
                 "news": news_items,
                 "health": {
@@ -138,7 +150,7 @@ class PositionMonitor:
                     "tasks_completed": self.tasks_completed,
                     "tasks_failed": self.tasks_failed,
                     "avg_time_ms": avg_time,
-                    "active_threads": self.max_workers # approximated
+                    "active_threads": self.max_workers
                 },
                 "timestamp": time.time()
             }
@@ -149,6 +161,18 @@ class PositionMonitor:
         except Exception as e:
             self.tasks_failed += 1
             print(f"Error analyzing {symbol}: {e}")
+            
+            # Emit a failure status to the UI so the asset still appears in sidebar
+            fail_payload = {
+                "symbol": symbol,
+                "type": type,
+                "status": "FAILED",
+                "confidence": 0.0,
+                "signal": "ERROR",
+                "reasons": [f"Analysis Error: {str(e)}"],
+                "health": {"score": 0, "reason": "System Error"}
+            }
+            self.queue.put(("position_analysis_update", fail_payload))
 
     def _fetch_relevant_news(self, coin: str) -> List[Dict[str, Any]]:
         """Fetch and filter news for a specific coin."""
@@ -177,69 +201,66 @@ class PositionMonitor:
     def _calculate_health(self, 
                          analysis: deep_analyzer.DeepAnalysisResult, 
                          news: List[Dict[str, Any]], 
-                         pos: Dict[str, Any]) -> Tuple[float, str]:
+                         data: Dict[str, Any],
+                         type: str) -> Tuple[float, str]:
         """
-        Calculate a 0-100 score representing the health of the trade.
+        Calculate health score. Works for both existing Positions and Pending Orders.
         """
         score = 50.0
         reasons = []
         
-        # 1. Technical Alignment (Max 40 pts)
-        # If we are LONG, and signal is BUY -> Good (+40)
-        # If we are LONG, and signal is SELL -> Bad (-40)
-        side = pos.get("side", "LONG")
+        # Determine side
+        side = data.get("side", "LONG")
+        if type == "ORDER":
+            # For orders, side might be BUY/SELL. Map to LONG/SHORT
+            side = "LONG" if side == "BUY" else "SHORT"
+            
         tech_signal = analysis.signal
         
+        # 1. Technical Alignment
         if side == "LONG":
             if "BUY" in tech_signal:
                 score += 30
-                reasons.append("Technicals Support Trade")
+                reasons.append("Trend Supports Entry")
             elif "SELL" in tech_signal:
                 score -= 30
-                reasons.append("Technicals Oppose Trade")
+                reasons.append("Trend Invalidation")
         else: # SHORT
             if "SELL" in tech_signal:
                 score += 30
-                reasons.append("Technicals Support Trade")
+                reasons.append("Trend Supports Entry")
             elif "BUY" in tech_signal:
                 score -= 30
-                reasons.append("Technicals Oppose Trade")
+                reasons.append("Trend Invalidation")
                 
-        # 2. PnL Check (Max 30 pts)
-        roi = 0.0
-        try:
-            pnl = float(pos.get("unrealized_profit", 0))
-            margin = float(pos.get("initialMargin", 1)) # avoid div/0
-            roi = (pnl / margin) * 100 if margin else 0
-        except:
-            pass
+        # 2. Performance/Price Check
+        if type == "POSITION":
+            try:
+                pnl = float(data.get("unrealized_profit", 0))
+                margin = float(data.get("initial_margin", 1))
+                roi = (pnl / margin) * 100 if margin else 0
+                if roi > 0: score += min(15, roi/2)
+                else: score -= min(25, abs(roi))
+            except: pass
+        else: # ORDER
+            # Is price moving away or towards entry?
+            try:
+                entry = float(data.get("price", 0))
+                current = analysis.entry # current price proxy from analyzer
+                # If current price is far from entry, validity drops
+                dist = abs(current - entry) / entry
+                if dist > 0.05: # >5% away
+                    score -= 20
+                    reasons.append("Price far from Limit")
+            except: pass
             
-        if roi > 0:
-            score += min(20, roi) # Cap at +20
-        else:
-            score -= min(20, abs(roi)) # Cap at -20
-            
-        # 3. News Sentiment (Max 30 pts)
+        # 3. News
         bullish_news = sum(1 for n in news if n['sentiment']['label'] == 'POSITIVE')
         bearish_news = sum(1 for n in news if n['sentiment']['label'] == 'NEGATIVE')
         
-        if side == "LONG":
-            if bullish_news > bearish_news:
-                score += 20
-                reasons.append("Positive News Sentiment")
-            elif bearish_news > bullish_news:
-                score -= 20
-                reasons.append("Negative News Sentiment")
-        else:
-             if bearish_news > bullish_news:
-                score += 20
-                reasons.append("Negative News Sentiment (Good for Short)")
-             elif bullish_news > bearish_news:
-                score -= 20
-                reasons.append("Positive News Sentiment (Bad for Short)")
+        if (side == "LONG" and bullish_news > bearish_news) or (side == "SHORT" and bearish_news > bullish_news):
+            score += 10
+            reasons.append("News Confluence")
         
-        # Clamp
         score = max(0.0, min(100.0, score))
-        
-        reason_str = ", ".join(reasons) if reasons else "Neutral conditions"
-        return score, reason_str
+        return score, ", ".join(reasons) if reasons else "Evaluating..."
