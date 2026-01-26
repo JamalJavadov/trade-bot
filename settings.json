@@ -166,22 +166,21 @@
     "impulse_lookback": 240,
     "htf_range_lookback": 200,
     "htf_bias_timeframes": [
-      "1d",
-      "4h",
-      "1h"
+      "4h"
     ],
-    "htf_min_alignment": 0.6,
-    "impulse_timeframe": "1h",
-    "confirm_timeframe": "15m",
+    "htf_min_alignment": 1.0,
+    "impulse_timeframe": "4h",
+    "confirm_timeframe": "4h",
     "measurement_timeframe": "15m",
-    "micro_confirm_timeframe": "5m",
-    "min_confluence": 2,
+    "micro_confirm_timeframe": "15m",
+    "min_confluence": 1,
     "require_confluence": true,
     "allow_setup_if_no_confirm": false,
     "zone_tolerance_atr": 0.25,
     "zone_tolerance_pct": 0.002,
-    "sl_atr_mult": 1.2,
-    "fib_zone_mode": "auto",
+    "sl_atr_mult": 0.0,
+    "fib_zone_mode": "golden",
+    "respect_body_atr_ratio": 0.6,
     "strong_trend_slope_lookback": 8,
     "strong_trend_slope_atr": 0.12,
     "strong_trend_ema_separation_atr": 0.3,
@@ -191,7 +190,7 @@
     "allow_weak_confluence": false,
     "allow_pre_zone": false,
     "max_pre_zone_atr": 1.5,
-    "allow_measurement_setup": false
+    "allow_measurement_setup": true
   },
   "deep_analysis": {
     "enabled": true,

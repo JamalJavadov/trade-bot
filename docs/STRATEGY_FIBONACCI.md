@@ -1,147 +1,126 @@
-# Fibonacci Strategy Blueprint (Codex Reference)
+# Fibonacci Golden Zone Pullback Strategy (Bot Blueprint)
 
-> **Purpose:** This document translates the provided Fibonacci trading videos into a precise, repeatable strategy that the bot can follow and that a human can audit. It is a professional, rule-based blueprint with clear entries, confirmations, exits, and risk controls.
+> **Purpose:** Convert the user's Fibonacci pullback system into a precise, auditable strategy for the bot. The system only trades the **Golden Zone (50%–61.8%)** with strict structure, confluence, and engulfing confirmation. It provides both **Swing Mode (4H)** and **Precision Mode (15M execution + 4H bias)**.
 
-## 1) Core Philosophy
-- Fibonacci levels are **not magic**; they are *measurement tools* for identifying **structured pullbacks** within a trend.
-- A valid setup needs **structure + confluence + confirmation + risk control**.
-- Levels are **zones**, not single price lines. We treat them as *areas of reaction*.
+## 1) Core Idea (Non-Negotiables)
+- Fibonacci is a **measurement + mapping tool**, not a prediction tool.
+- The bot only trades when price shows:
+  1. **Correct anchoring (wick-to-wick)**
+  2. **Confluence (at least one reason to react)**
+  3. **Respect + confirmation**
+  4. **Structured exits**
+- **Golden Zone only:** 0.50–0.618.
+- **Entry trigger only:** Engulfing candles (bullish or bearish).
 
-## 2) Chart Setup & Tools
-**Timeframes**
-1. **HTF Bias Stack (default: 1D + 4H)** – trend and premium/discount alignment across multiple higher timeframes.
-2. **Impulse TF (default: 1H)** – main impulse leg selection + golden zone setup.
-3. **Confirm TF (default: 15M)** – confirmation signals (engulfing, star, rejection).
-4. **Measurement TF (default: 15M)** – BOS/FVG measurement setups (can differ from confirm TF).
+## 2) Chart Setup
+### A) Swing Mode (Recommended)
+- **Timeframe:** 4H
+- **Tools:**
+  - Fibonacci Retracement (custom levels)
+  - Fractals (5-period) for swing identification
+  - Optional confluence: Swap Zones (S/R flip), 50 EMA, Anchored VWAP (from impulse start)
 
-**Indicators / Tools**
-- Fibonacci Retracement (standard levels).
-- 50 EMA (trend + dynamic S/R).
-- Anchored VWAP (from impulse start).
-- Fractals (5-period) to locate swing highs/lows.
-- Optional: Fib Time Zones (timing confluence, optional).
+### B) Precision Mode (Sniper Execution)
+- **Bias timeframe:** 4H
+- **Execution timeframe:** 15M
+- **Tools:**
+  - Fibonacci Retracement (includes 0.71 level)
+  - Optional: Fair Value Gap (FVG)
 
-**HTF Alignment Rule**
-- The bot takes the **majority bias** across HTF timeframes. If the alignment ratio is below the configured threshold, it stands aside.
+## 3) Market Conditions (Trade Permissions)
+- **Uptrend:** Higher highs + higher lows.
+- **Downtrend:** Lower highs + lower lows.
+- If structure is **choppy, range-bound, or unclear → NO TRADE**.
 
-## 3) Fibonacci Settings
-Retracement zones (choose by regime or let the bot auto-select):
-- **Golden Zone:** 0.50–0.618 (balanced trend pullback)
-- **Strong Trend Zone:** 0.382–0.50 (shallow pullback in aggressive trends)
-- **Beginner Zone:** 0.382–0.618 (broadest reaction band)
-- Optional: 0.786 (deep retrace filter only)
+## 4) Step 1 — Precision Anchor Rule (Wick-to-Wick)
+### Uptrend
+- Identify the **most recent impulsive swing up**.
+- Anchor Fibonacci **0% at swing high wick**, **100% at swing low wick**.
 
-Extensions for targets:
-- **1.0 measured move** (swing high/low retest)
-- **1.618 extension** (primary TP2 target)
-- Optional: 1.272 extension (aggressive but closer TP2)
+### Downtrend
+- Identify the **most recent impulsive swing down**.
+- Anchor Fibonacci **0% at swing low wick**, **100% at swing high wick**.
 
-Measurement entry zone:
-- **0.71 – 0.75** (precision retrace zone)
+**Market Respect Adjustment:**
+- If price ignores your fib, **keep the true extreme fixed** and adjust the starting anchor to the next most obvious significant swing that price respects.
 
-## 4) Swing Selection (Precision Anchor)
-1. Identify the **impulse leg** in the trend direction.
-2. Anchor Fibonacci **from wick to wick**:
-   - **Uptrend:** swing low wick → swing high wick.
-   - **Downtrend:** swing high wick → swing low wick.
-3. If price ignores the first anchor (no reactions), adjust to the **next significant swing**.
+## 5) Step 2 — The Only Zone We Trade (Golden Zone)
+- **Golden Zone = 50% to 61.8%**.
+- 38.2% is **not** a primary entry zone.
 
-## 5) Fibonacci Retracement Strategy (Primary)
-**Idea:** In a trend, price often retraces into a Fibonacci **reaction zone** before continuation.
+## 6) Step 3 — Confluence Filters (Choose at least ONE)
+The Golden Zone is tradable only when it aligns with at least one confluence:
+- **Swap Zone (S/R flip)**
+- **50 EMA dynamic support/resistance**
+- **Anchored VWAP** (anchored from impulse start)
 
-### 5.1 Entry Zone (Adaptive)
-- **Golden Zone (default classic):** 0.50–0.618.
-- **Strong Trend Zone:** 0.382–0.50.
-- **Beginner Zone:** 0.382–0.618.
+**Best setups:** Golden Zone + **2+ confluences**.
 
-### 5.2 Confluence Filters (must have at least one)
-- **EMA50**: price retraces into golden zone + EMA50 agrees with trend slope.
-- **Anchored VWAP**: anchored from impulse start, overlapping the zone.
-- **Swap Zone**: prior support turned resistance (or vice versa) aligns with zone.
+## 7) Step 4 — “Golden Respect” Rule (Mandatory)
+A touch is not enough. We require **respect**:
+- Price slows into the zone.
+- Wicks reject the zone.
+- Multiple candles fail to break deeper.
+- Bodies stay relatively small (hesitation).
 
-### 5.3 Confirmation (required for “OK”)
-Choose one of:
-- **Bullish/Bearish Engulfing** inside the zone.
-- **Morning/Evening Star** inside the zone.
-- **Rejection Wick** (wick through zone, close back inside).
+If price slices cleanly through 50% and 61.8% with no hesitation → **NO TRADE**.
 
-Plus: **Golden Respect Rule**
-- Require 2–3 closes that **respect** the zone (no clean break through it).
+## 8) Step 5 — Entry Trigger (Mandatory)
+**Entry Trigger = Engulfing Candle at the Golden Zone.**
 
-### 5.4 Stop & Targets
-- **Stop Loss:** beyond the swing point (ATR buffered).
-  - Long: below swing low.
-  - Short: above swing high.
-- **TP1:** return to swing high/low.
-- **TP2:** 1.618 extension (optional 1.272 for conservative exits).
+### Buy Entry (Long)
+- Price retraces into Golden Zone + confluence.
+- Shows respect.
+- **Bullish Engulfing** candle forms.
+- Entry options:
+  - Aggressive: close of engulfing candle.
+  - Safer: break of engulfing high.
 
-### 5.5 Setup vs. OK
-- **OK:** in zone + confirmation + confluence.
-- **SETUP:** in zone but confirmation pending, or very near zone (watchlist).
+### Sell Entry (Short)
+- Price retraces into Golden Zone + confluence.
+- Shows respect.
+- **Bearish Engulfing** candle forms.
+- Entry options:
+  - Aggressive: close of engulfing candle.
+  - Safer: break of engulfing low.
 
-## 6) Measurement Strategy (71% Entry)
-**Idea:** Use Fibonacci as a *measurement tool* after liquidity sweep + BOS.
+## 9) Risk Management (Stop Loss)
+- **Buy:** stop below the **swing low wick** that anchored the fib.
+- **Sell:** stop above the **swing high wick** that anchored the fib.
 
-### 6.1 Preconditions
-1. **Liquidity Sweep** (stop-hunt).
-2. **Break of Structure** (BOS) in intended direction.
-3. Identify the impulse leg from sweep → BOS.
+## 10) Targets & Exits
+- **TP1:** 0% fib level (impulse extreme / prior swing point).
+- **Partial take profit:** 50–70% at TP1.
+- **Runner exit:** ride until structure exhaustion (rejections, failed pushes, momentum stall).
 
-### 6.2 Entry Zone
-- **Short:** retrace into **0.71–0.75** zone.
-- **Long:** retrace into **0.71–0.75** zone.
+## 11) Precision Mode Bonus — 15M “71% + SMC” Execution
+Use this when you want tighter entries with less drawdown.
 
-### 6.3 Confluence Boost
-- **Fair Value Gap (FVG) overlap** with the 0.71–0.75 zone.
+**Checklist (all required):**
+1. **HTF Alignment:**
+   - Above 50% of 4H range = premium → look for sells.
+   - Below 50% = discount → look for buys.
+2. **Liquidity Sweep** (wick through a major high/low).
+3. **Break of Structure (BOS)** + **Imbalance/FVG**.
+4. **Entry at 71% retracement** (best if aligned with FVG).
 
-### 6.4 Stop & Targets
-- **Stop:** beyond the impulse high/low.
-- **TP:** opposite end of the impulse (range low/high).
+**Execution Rules:**
+- Limit order at 71%.
+- Stop at 100% extreme.
+- TP at 0% extreme.
+- If price reacts early but does not break the fib extremes, the setup remains valid.
 
-## 7) Risk Management Rules
-- Risk per trade: **1–2%** (configurable by bot).
-- Minimum **RR2** threshold (default 2.0).
-- Reject entries if **distance to entry > 2 ATR** (avoids chasing).
+## 12) Optional Timing Layer — Fibonacci Time Zones
+- Plot time zones from a swing high → swing low.
+- Prioritize setups only when price hits Golden Zone or 71% **during a time-zone reaction window**.
 
-## 8) How the Bot Scores “Best Coin”
-The bot does not “predict guaranteed success.” It ranks trades by **objective scoring**:
-- **RR2** (reward/risk).
-- **Trend alignment** (EMA bias).
-- **Confluence count** (EMA50, AVWAP, swap zone, FVG overlap).
-- **Confirmation quality** (engulfing / star / rejection).
-
-The coin with the **highest score** is presented as the **BEST PLAN**.
-
-**Fit Probability (Uyğunluq faizi)**
-- Each coin gets a **fit percentage** based on its score relative to the best score in the scan.
-- This is **not a guaranteed win rate**; it reflects *how well the coin matches the strategy rules*.
-
-## 9) Operational Checklist (Human or Bot)
-1. Identify 4H trend bias (EMA or premium/discount).
-2. Find impulse leg on 1H and draw Fibonacci.
-3. Check if price is in the selected Fib zone (Golden/Strong/Beginner).
-4. Require at least one confluence.
-5. Confirm with a candlestick reversal or rejection wick.
-6. Compute SL/TPs and RR.
-7. Use **pending limit orders** at the planned entry price (no market chase).
-8. If all rules pass → **OK**. Else → **SETUP** (watch).
-
-## 10) Parameters (Bot Settings Reference)
-Key settings in `settings.json`:
-- `strategy.min_confluence`
-- `strategy.zone_tolerance_atr`
-- `strategy.allow_pre_zone`
-- `strategy.htf_bias_timeframes`
-- `strategy.htf_min_alignment`
-- `strategy.impulse_timeframe`
-- `strategy.confirm_timeframe`
-- `strategy.measurement_timeframe`
-- `risk.min_rr2`
-- `risk.max_entry_distance_atr`
-- `scoring.w_confluence_count`
-- `scoring.w_confirmation`
+## 13) Bot Implementation Notes
+- The bot enforces **Golden Zone only** and **engulfing-only confirmation**.
+- Confluence is required (minimum 1).
+- Stops are anchored to the swing wick extremes without ATR padding.
+- Measurement mode uses 71% retracement after sweep + BOS.
 
 ---
 
 ### Final Notes
-This is a professional, rules-first strategy. It **reduces false signals** by requiring structure, confluence, and confirmation. It is designed to be **auditable**, reproducible, and safe for algorithmic execution.
+This is a professional, rules-first strategy built for **clarity, repeatability, and auditability**. It avoids impulsive trades, prioritizes confluence, and executes only when price **proves respect** at the Golden Zone.
