@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
@@ -494,24 +495,23 @@ def run_deep_analysis_scan(
     best_result: Optional[Dict[str, Any]] = None
     best_score: float = 0.0
     
-    total = len(symbols)
+    threading_config = settings.get("threading", {})
+    threading_enabled = bool(threading_config.get("enabled", True))
+    max_workers = int(threading_config.get("max_workers", 8))
+    max_workers = max(1, max_workers)
     
-    for idx, sym in enumerate(symbols, start=1):
+    def analyze_symbol(sym: str) -> Dict[str, Any]:
         sym = sym.upper().strip()
-        if on_progress:
-            on_progress(idx, total, sym)
-        
         # Validate symbol
         if not bd.is_valid_usdtm_perp(sym):
-            results.append({
+            return {
                 "symbol": sym,
                 "status": "NO_TRADE",
                 "side": "-",
                 "confidence": 0.0,
                 "quality_score": 0.0,
                 "reason": "Symbol USDT-M PERP deyil / TRADING deyil",
-            })
-            continue
+            }
         
         try:
             # Get comprehensive market data
@@ -543,7 +543,7 @@ def run_deep_analysis_scan(
             else:
                 status = "NO_TRADE"
             
-            result_dict = {
+            return {
                 "symbol": sym,
                 "status": status,
                 "side": deep_result.side,
@@ -569,23 +569,55 @@ def run_deep_analysis_scan(
                 "market_data_score": deep_result.market_data_score,
                 "details": deep_result.details,
             }
-            
-            results.append(result_dict)
-            
-            # Track best result
-            if status in ("OK", "SETUP") and deep_result.quality_score > best_score:
-                best_score = deep_result.quality_score
-                best_result = result_dict
-                
         except Exception as e:
-            results.append({
+            return {
                 "symbol": sym,
                 "status": "NO_TRADE",
                 "side": "-",
                 "confidence": 0.0,
                 "quality_score": 0.0,
                 "reason": f"ERROR: {e}",
-            })
+            }
+    
+    total = len(symbols)
+    
+    if threading_enabled and max_workers > 1 and total > 1:
+        completed = 0
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_map = {
+                executor.submit(analyze_symbol, sym): sym
+                for sym in symbols
+            }
+            
+            for future in as_completed(future_map):
+                sym = future_map[future]
+                try:
+                    result = future.result()
+                except Exception as e:
+                    result = {
+                        "symbol": str(sym).upper().strip(),
+                        "status": "NO_TRADE",
+                        "side": "-",
+                        "confidence": 0.0,
+                        "quality_score": 0.0,
+                        "reason": f"ERROR: {e}",
+                    }
+                results.append(result)
+                completed += 1
+                if on_progress:
+                    on_progress(completed, total, result.get("symbol", sym))
+    else:
+        for idx, sym in enumerate(symbols, start=1):
+            if on_progress:
+                on_progress(idx, total, str(sym).upper().strip())
+            results.append(analyze_symbol(sym))
+    
+    for result in results:
+        if result.get("status") in ("OK", "SETUP"):
+            score = float(result.get("quality_score", 0.0))
+            if score > best_score:
+                best_score = score
+                best_result = result
     
     return results, best_result
 

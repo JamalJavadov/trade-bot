@@ -16,6 +16,8 @@ from ..core.planner import (
     save_settings,
     run_scan_and_build_best_plan,
     format_report,
+    run_deep_analysis_scan,
+    format_deep_analysis_scan_report,
 )
 from ..core.position_monitor import PositionMonitor
 from .deep_dashboard import DeepAnalysisDashboard, DeepAnalysisWindow
@@ -1191,6 +1193,41 @@ class App:
             textvariable=self.progress_pct_var,
             style="Normal.TLabel"
         ).pack(side="right", padx=(12, 0))
+
+        threading_settings = self.settings.get("threading", {})
+        thread_count_default = int(
+            threading_settings.get(
+                "max_workers",
+                threading_settings.get("max_concurrent_symbols", 10),
+            )
+        )
+        self.thread_count_var = tk.IntVar(value=max(1, thread_count_default))
+
+        threading_frame = ttk.Frame(scan_card, style="Card.TFrame")
+        threading_frame.pack(fill="x", pady=(0, 12))
+
+        ttk.Label(
+            threading_frame,
+            text="Thread sayı:",
+            style="Normal.TLabel",
+        ).grid(row=0, column=0, sticky="w", padx=(0, 8))
+
+        self.thread_count_spinbox = ttk.Spinbox(
+            threading_frame,
+            from_=1,
+            to=64,
+            textvariable=self.thread_count_var,
+            width=8,
+            style="Modern.TSpinbox",
+            font=ModernStyle.FONT_MAIN,
+        )
+        self.thread_count_spinbox.grid(row=0, column=1, sticky="w")
+
+        ttk.Label(
+            threading_frame,
+            text="(Multithreading performansı üçün)",
+            style="Muted.TLabel",
+        ).grid(row=0, column=2, sticky="w", padx=(10, 0))
         
         # Run button
         btn_container = ttk.Frame(scan_card, style="Card.TFrame")
@@ -1817,6 +1854,19 @@ class App:
         self.settings.setdefault("budget", {})["default_usdt"] = float(self.budget_var.get())
         self.settings.setdefault("risk", {})["risk_pct"] = float(self.risk_pct_var.get())
         self.settings.setdefault("risk", {})["leverage"] = int(self.lev_var.get())
+        threading_settings = self.settings.setdefault("threading", {})
+        try:
+            thread_count = int(self.thread_count_var.get())
+        except (ValueError, tk.TclError):
+            thread_count = int(threading_settings.get("max_workers", 8))
+        thread_count = max(1, thread_count)
+        threading_settings["max_workers"] = thread_count
+        threading_settings["max_concurrent_symbols"] = thread_count
+        threading_settings["max_concurrent_timeframes"] = min(
+            thread_count,
+            int(threading_settings.get("max_concurrent_timeframes", 5)),
+        )
+        self.thread_count_var.set(thread_count)
         symbols_settings = self.settings.setdefault("symbols", {})
         mode = self.symbol_mode_var.get()
         symbols_settings["auto_top_usdtm"] = mode == "top"
@@ -1968,27 +2018,48 @@ Bu real əməliyyatdır! Davam edilsin?"""
                 
                 def on_stage(text: str):
                     self._q.put(("stage", text))
-                
-                results, best = run_scan_and_build_best_plan(
-                    binance_data=binance_data,
-                    analyzer=analyzer,
-                    settings=settings,
-                    symbols=symbols,
-                    budget_usdt=budget,
-                    risk_pct=risk_pct,
-                    leverage=lev,
-                    on_progress=on_progress,
-                    on_stage=on_stage,
-                )
-                report = format_report(results, best, settings, snapshot_path=None)
-                summary = {
-                    "ok": len([r for r in results if r.status == "OK"]),
-                    "setup": len([r for r in results if r.status == "SETUP"]),
-                    "no": len([r for r in results if r.status == "NO_TRADE"]),
-                    "total": len(results),
-                    "best": best.symbol if best else None,
-                    "best_fit": float(best.probability) if best else 0.0,
-                }
+
+                deep_enabled = bool(settings.get("deep_analysis", {}).get("enabled", True))
+                if deep_enabled:
+                    results, best = run_deep_analysis_scan(
+                        symbols=symbols,
+                        settings=settings,
+                        budget_usdt=budget,
+                        risk_pct=risk_pct,
+                        leverage=lev,
+                        on_progress=on_progress,
+                        on_stage=on_stage,
+                    )
+                    report = format_deep_analysis_scan_report(results, best, settings)
+                    summary = {
+                        "ok": len([r for r in results if r.get("status") == "OK"]),
+                        "setup": len([r for r in results if r.get("status") == "SETUP"]),
+                        "no": len([r for r in results if r.get("status") == "NO_TRADE"]),
+                        "total": len(results),
+                        "best": best.get("symbol") if best else None,
+                        "best_fit": float(best.get("confidence", 0.0)) if best else 0.0,
+                    }
+                else:
+                    results, best = run_scan_and_build_best_plan(
+                        binance_data=binance_data,
+                        analyzer=analyzer,
+                        settings=settings,
+                        symbols=symbols,
+                        budget_usdt=budget,
+                        risk_pct=risk_pct,
+                        leverage=lev,
+                        on_progress=on_progress,
+                        on_stage=on_stage,
+                    )
+                    report = format_report(results, best, settings, snapshot_path=None)
+                    summary = {
+                        "ok": len([r for r in results if r.status == "OK"]),
+                        "setup": len([r for r in results if r.status == "SETUP"]),
+                        "no": len([r for r in results if r.status == "NO_TRADE"]),
+                        "total": len(results),
+                        "best": best.symbol if best else None,
+                        "best_fit": float(best.probability) if best else 0.0,
+                    }
                 best_payload = self._build_best_payload(best)
                 self._q.put(("done", report, summary, best_payload))
             except Exception as e:
@@ -2106,6 +2177,29 @@ Bu real əməliyyatdır! Davam edilsin?"""
     def _build_best_payload(self, best) -> Optional[dict]:
         if not best:
             return None
+        if isinstance(best, dict):
+            reason = best.get("reason")
+            if not reason and best.get("reasons"):
+                reason = "; ".join(best.get("reasons", []))
+            return {
+                "symbol": best.get("symbol", "-"),
+                "status": best.get("status", "-"),
+                "side": best.get("side", "-"),
+                "entry": float(best.get("entry", 0.0)),
+                "sl": float(best.get("sl", 0.0)),
+                "tp1": float(best.get("tp1", 0.0)),
+                "tp2": float(best.get("tp2", 0.0)),
+                "rr1": float(best.get("rr1", 0.0)),
+                "rr2": float(best.get("rr2", 0.0)),
+                "fit": float(best.get("confidence", best.get("quality_score", 0.0))),
+                "score": float(best.get("quality_score", best.get("confidence", 0.0))),
+                "qty": float(best.get("qty", 0.0)),
+                "leverage": int(best.get("leverage", 1)),
+                "risk_target": float(best.get("risk_target", 0.0)),
+                "risk_actual": float(best.get("risk_actual", 0.0)),
+                "reason": reason or "",
+                "details": dict(best.get("details", {})) if best.get("details") else {},
+            }
         return {
             "symbol": best.symbol,
             "status": best.status,
