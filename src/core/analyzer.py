@@ -847,15 +847,35 @@ def analyze_symbol(
             if measurement:
                 candidates.append(measurement)
 
-    eligible = [c for c in candidates if c.rr2 >= min_rr2]
+    # Enforce strict 3:1 RR on candidates before filtering if enabled
+    enforce_strict = bool(risk_cfg.get("enforce_strict_rr", False))
+    rr_buffer = float(risk_cfg.get("rr_buffer_pct", 1.0))
+    if enforce_strict:
+        for c in candidates:
+            if c.side in ("LONG", "SHORT"):
+                risk_dist = abs(c.entry - c.sl)
+                if risk_dist > 0:
+                    direction = 1 if c.side == "LONG" else -1
+                    target_rr = 3.0 * rr_buffer
+                    c.tp2 = float(c.entry + direction * (risk_dist * target_rr))
+                    c.rr2 = float(abs(c.tp2 - c.entry) / risk_dist)
+                    if abs(c.tp1 - c.entry) / risk_dist > 1.0:
+                        c.tp1 = float(c.entry + direction * risk_dist)
+                        c.rr1 = 1.0
+                    c.reason = f"{c.reason} | Strict 3:1 buffered"
+
+    # Use buffered threshold for eligibility if strict mode is active
+    rr_threshold = min_rr2 * rr_buffer if enforce_strict else min_rr2
+    eligible = [c for c in candidates if c.rr2 >= rr_threshold]
+
     best: Optional[Analysis] = None
     if eligible:
         best = max(eligible, key=lambda x: x.score)
     else:
         fallback_side = _fallback_bias(ema_bias, pd_bias, df_impulse)
         if fallback_side:
-            fallback = _build_fallback_setup(df_impulse, fallback_side, atr1, min_rr2, strategy_cfg)
-            if fallback and fallback.rr2 >= min_rr2:
+            fallback = _build_fallback_setup(df_impulse, fallback_side, atr1, rr_threshold, strategy_cfg)
+            if fallback and fallback.rr2 >= rr_threshold:
                 if fallback.details is not None:
                     fallback.details = {
                         **fallback.details,
@@ -866,33 +886,23 @@ def analyze_symbol(
                         "measurement_timeframe": measurement_tf,
                     }
                 best = fallback
+
         if best is None:
-            return Analysis(
-                status="NO_TRADE",
-                side="-",
-                reason=f"RR hədəfi {min_rr2:.2f} qarşılanmadı (3x1 qaydası)",
-            )
+            # Pick best from non-eligible candidates to show a quality score
+            last_close = float(df_impulse["close"].iloc[-1])
+            if candidates:
+                best = max(candidates, key=lambda x: x.score)
+                best.status = "NO_TRADE"
+                best.reason = f"RR hədəfi {rr_threshold:.2f} qarşılanmadı (Setup var amma 3x1 deyil)"
+            else:
+                best = Analysis(
+                    status="NO_TRADE",
+                    side=ema_bias if ema_bias in ("LONG", "SHORT") else "-",
+                    entry=last_close,
+                    reason="Setup tapılmadı (Trend/Zone uyğunsuzluğu)",
+                )
 
     last_close = float(df_impulse["close"].iloc[-1])
-
-    # Enforce strict 3:1 RR if enabled
-    enforce_strict = bool(risk_cfg.get("enforce_strict_rr", False))
-    rr_buffer = float(risk_cfg.get("rr_buffer_pct", 1.0))
-    if enforce_strict and best.side in ("LONG", "SHORT"):
-        risk_dist = abs(best.entry - best.sl)
-        if risk_dist > 0:
-            direction = 1 if best.side == "LONG" else -1
-            # Recalculate TP2 based on 3x risk * buffer
-            target_rr = 3.0 * rr_buffer
-            best.tp2 = float(best.entry + direction * (risk_dist * target_rr))
-            # Recalculate RR2
-            best.rr2 = float(abs(best.tp2 - best.entry) / risk_dist)
-            # Also adjust TP1 to 1:1 if it was further
-            if abs(best.tp1 - best.entry) / risk_dist > 1.0:
-                best.tp1 = float(best.entry + direction * risk_dist)
-                best.rr1 = 1.0
-            best.reason = f"{best.reason} | Strict 3:1 RR applied (buf={rr_buffer})"
-
     dist_atr = abs(last_close - best.entry) / atr1
     penalty = 1.0
     if dist_atr > max_entry_atr:

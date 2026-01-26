@@ -308,10 +308,8 @@ def run_scan_and_build_best_plan(
         return float(max(5.0, min(95.0, blended)))
 
     for r in results:
-        if r.status in ("OK", "SETUP"):
-            r.probability = _blend_probability(r.score)
-        else:
-            r.probability = 5.0
+        # Use blended probability for all coins to show relative strength
+        r.probability = _blend_probability(r.score)
     if best_ok:
         best_ok.probability = _blend_probability(best_ok.score)
     if best_setup:
